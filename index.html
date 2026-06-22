@@ -427,6 +427,127 @@
       100% { top: 100%; opacity: 0; }
     }
 
+    /* ── Theme Toggle ── */
+    .theme-toggle {
+      display: flex; align-items: center; justify-content: center;
+      width: 36px; height: 36px; border-radius: var(--radius-full);
+      background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+      color: var(--text-muted); cursor: pointer;
+      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      backdrop-filter: blur(8px);
+    }
+    .theme-toggle:hover {
+      background: rgba(255,255,255,0.12); border-color: rgba(255,255,255,0.2);
+      color: var(--text-primary); transform: scale(1.1);
+    }
+    .theme-toggle .icon-moon { display: block; }
+    .theme-toggle .icon-sun { display: none; }
+
+    /* ── Light Mode ── */
+    :root.light {
+      --bg-base: #F0F0F5;
+      --bg-glass: rgba(255,255,255,0.65);
+      --border-glass: rgba(0,0,0,0.08);
+      --text-primary: #1A1A2E;
+      --text-muted: #6B6B80;
+
+      --brand-violet: #7C3AED;
+      --brand-violet-glow: #8B5CF6;
+      --brand-cyan: #0EA5E9;
+      --brand-mint: #10B981;
+      --brand-amber: #F59E0B;
+      --brand-red: #EF4444;
+      --brand-pink: #EC4899;
+      --brand-gold: #EAB308;
+      --brand-magenta: #D946EF;
+      --brand-teal: #14B8A6;
+    }
+    :root.light body::before { opacity: 0.3; }
+    :root.light .nav-bar {
+      background: rgba(240,240,245,0.8);
+      border-bottom: 1px solid rgba(0,0,0,0.06);
+      box-shadow: 0 4px 40px rgba(0,0,0,0.08);
+    }
+    :root.light .nav-tab.active {
+      background: rgba(26,26,46,0.9); color: white;
+      box-shadow: 0 2px 12px rgba(26,26,46,0.2);
+    }
+    :root.light .theme-toggle {
+      background: rgba(0,0,0,0.05); border-color: rgba(0,0,0,0.1);
+      color: var(--text-muted);
+    }
+    :root.light .theme-toggle:hover {
+      background: rgba(0,0,0,0.1); border-color: rgba(0,0,0,0.15);
+      color: var(--text-primary);
+    }
+    :root.light .theme-toggle .icon-moon { display: none; }
+    :root.light .theme-toggle .icon-sun { display: block; }
+    :root.light .glass-card {
+      background: rgba(255,255,255,0.6);
+      border: 1px solid rgba(0,0,0,0.08);
+      box-shadow: 0 4px 30px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.8);
+    }
+    :root.light .glass-card:hover {
+      box-shadow: 0 8px 40px rgba(0,0,0,0.12), inset 0 1px 0 rgba(255,255,255,0.9);
+    }
+    :root.light .agent-card {
+      background: rgba(255,255,255,0.55);
+      border: 1px solid rgba(0,0,0,0.06);
+      box-shadow: 0 4px 24px rgba(0,0,0,0.06), inset 0 1px 0 rgba(255,255,255,0.8);
+    }
+    :root.light .task-card {
+      background: rgba(255,255,255,0.5);
+      border: 1px solid rgba(0,0,0,0.06);
+    }
+    :root.light .cron-card {
+      background: rgba(255,255,255,0.5);
+      border: 1px solid rgba(0,0,0,0.06);
+    }
+    :root.light .add-task-form {
+      background: rgba(255,255,255,0.6);
+      border: 1px solid rgba(0,0,0,0.08);
+    }
+    :root.light .add-task-form input,
+    :root.light .add-task-form select,
+    :root.light .add-task-form textarea {
+      background: rgba(0,0,0,0.03); border-color: rgba(0,0,0,0.1);
+      color: var(--text-primary);
+    }
+    :root.light .content-editor {
+      background: rgba(0,0,0,0.03); border-color: rgba(0,0,0,0.08);
+      color: var(--text-primary);
+    }
+    :root.light .btn-secondary {
+      background: rgba(0,0,0,0.04); border-color: rgba(0,0,0,0.1);
+      color: var(--text-muted);
+    }
+    :root.light .btn-secondary:hover {
+      background: rgba(0,0,0,0.08); color: var(--text-primary);
+    }
+    :root.light .filter-btn {
+      background: rgba(0,0,0,0.04); border-color: rgba(0,0,0,0.08);
+      color: var(--text-muted);
+    }
+    :root.light .filter-btn:hover {
+      background: rgba(0,0,0,0.08); color: var(--text-primary);
+    }
+    :root.light .filter-btn.active {
+      background: rgba(26,26,46,0.9); color: white;
+    }
+    :root.light .nav-tabs {
+      background: rgba(0,0,0,0.04); border-color: rgba(0,0,0,0.06);
+    }
+    :root.light .content-preview-body code {
+      background: rgba(0,0,0,0.06);
+    }
+    :root.light .content-preview-body pre {
+      background: rgba(0,0,0,0.05); border-color: rgba(0,0,0,0.08);
+    }
+    :root.light .content-doc-item:hover { background: rgba(0,0,0,0.04); }
+    :root.light .content-doc-item.selected { background: rgba(0,0,0,0.06); }
+    :root.light .scan-line { opacity: 0.3; }
+    :root.light .content-sidebar { border-color: rgba(0,0,0,0.06); }
+
     @media (max-width: 1024px) {
       .grid-ops { grid-template-columns: 1fr; }
       .grid-5 { grid-template-columns: repeat(2, 1fr); }
@@ -455,10 +576,16 @@
     <button class="nav-tab" data-tab="schedule">Schedule</button>
     <button class="nav-tab" data-tab="content">Content</button>
   </div>
-  <div class="nav-status">
-    <div class="status-dot"></div>
-    <span>All systems operational</span>
-    <span class="nav-clock" id="navClock"></span>
+  <div style="display:flex;align-items:center;gap:var(--space-3);">
+    <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Toggle light/dark mode">
+      <svg class="icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+      <svg class="icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+    </button>
+    <div class="nav-status">
+      <div class="status-dot"></div>
+      <span>All systems operational</span>
+      <span class="nav-clock" id="navClock"></span>
+    </div>
   </div>
 </nav>
 
@@ -536,6 +663,19 @@
 
 <script type="module">
 import { GlassCard, Badge, StatCard, ProgressBar, ThinBar, DonutChart, drawDonut } from './components.js';
+
+// ══════════════════════════════════════════════════════════════
+// THEME TOGGLE
+// ══════════════════════════════════════════════════════════════
+const savedTheme = localStorage.getItem('agentos-theme') || 'dark';
+if (savedTheme === 'light') document.documentElement.classList.add('light');
+
+window.toggleTheme = function() {
+  const isLight = document.documentElement.classList.toggle('light');
+  localStorage.setItem('agentos-theme', isLight ? 'light' : 'dark');
+  // Update Three.js particle colors for light mode
+  if (window._updateParticleColors) window._updateParticleColors(isLight);
+};
 
 // ══════════════════════════════════════════════════════════════
 // THREE.JS PARTICLE BACKGROUND
@@ -682,6 +822,25 @@ import { GlassCard, Badge, StatCard, ProgressBar, ThinBar, DonutChart, drawDonut
     renderer.render(scene, camera);
   }
   animate();
+
+  // Theme-aware particle colors
+  const darkPalette = [
+    [0.545, 0.361, 0.965], [0.490, 0.827, 0.988], [0.369, 0.886, 0.710],
+    [0.906, 0.451, 0.714], [0.910, 0.475, 0.976],
+  ];
+  const lightPalette = [
+    [0.486, 0.227, 0.929], [0.055, 0.647, 0.914], [0.063, 0.725, 0.506],
+    [0.925, 0.282, 0.600], [0.851, 0.275, 0.937],
+  ];
+  window._updateParticleColors = function(isLight) {
+    const pal = isLight ? lightPalette : darkPalette;
+    const col = geometry.attributes.color.array;
+    for (let i = 0; i < PARTICLE_COUNT; i++) {
+      const c = pal[Math.floor(Math.random() * pal.length)];
+      col[i * 3] = c[0]; col[i * 3 + 1] = c[1]; col[i * 3 + 2] = c[2];
+    }
+    geometry.attributes.color.needsUpdate = true;
+  };
 
   window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
