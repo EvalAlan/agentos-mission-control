@@ -7,6 +7,7 @@ import json
 import os
 import re
 import sqlite3
+import subprocess
 import time
 import uuid
 from datetime import datetime, timezone
@@ -38,14 +39,11 @@ def init_board_db():
     if count == 0:
         now = datetime.now(timezone.utc).isoformat()
         seeds = [
-            ("t1", "Set up SSH keys for VPS access", "done", "high", "ed25519 key pair", now),
-            ("t2", "Configure Discord bot permissions", "in_progress", "high", "Admin + intents enabled", now),
-            ("t3", "Write first blog post for AgentOS", "pending", "medium", "SEO keyword: agent automation", now),
-            ("t4", "Design email welcome sequence", "pending", "medium", "5-email nurture flow", now),
-            ("t5", "Review competitor pricing pages", "in_progress", "low", "Compare 6 platforms", now),
-            ("t6", "Deploy Tailscale on VPS", "done", "high", "Mesh network for remote access", now),
-            ("t7", "Create social media content calendar", "pending", "medium", "30-day plan", now),
-            ("t8", "Fix dashboard SSE reconnect bug", "in_progress", "high", "Falls back to polling", now),
+            ("infra-agentos", "Finish AgentOS dashboard wiring", "in_progress", "high", "Backed by Hermes sessions, ~/repos, and Tailscale Serve", now),
+            ("aegis-android", "Aegis Android-first planning", "pending", "high", "Go Briar-like decentralized chat over Tor/BT/WiFi", now),
+            ("evilhotkeys-gw2", "evilhotkeys GW2 spec maintenance", "pending", "medium", "Pixel-state debugging, fishing/manual pool workflow, mechanist/untamed specs", now),
+            ("elemta-work", "Elemta MTA backlog", "pending", "medium", "Go MTA, observability, LDAP, queue/security work", now),
+            ("evilsdr-work", "evilSDR/Skywarn backlog", "pending", "medium", "SDR tooling, scan hits, GUI polish", now),
         ]
         conn.executemany("INSERT INTO tasks (id, title, status, priority, notes, created_at) VALUES (?,?,?,?,?,?)", seeds)
     conn.commit()
@@ -138,8 +136,18 @@ def sessions_data():
 
         if "sessions" in tables:
             count = conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
-            cols = [r[1] for r in conn.execute("PRAGMA table_info(sessions)").fetchall()]
-            recent = [dict(r) for r in conn.execute("SELECT * FROM sessions ORDER BY rowid DESC LIMIT 25").fetchall()]
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(sessions)").fetchall()}
+            wanted = [
+                "id", "source", "model", "started_at", "ended_at", "end_reason",
+                "message_count", "tool_call_count", "input_tokens", "output_tokens",
+                "cache_read_tokens", "reasoning_tokens", "title", "api_call_count",
+            ]
+            safe_cols = [c for c in wanted if c in cols]
+            if safe_cols:
+                col_sql = ", ".join(safe_cols)
+                recent = [dict(r) for r in conn.execute(f"SELECT {col_sql} FROM sessions ORDER BY rowid DESC LIMIT 25").fetchall()]
+            else:
+                recent = []
 
         if "messages" in tables:
             messages = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
@@ -267,11 +275,115 @@ def cron_jobs():
     return jobs
 
 
+
+def _run_git(repo, args):
+    if not repo or not os.path.isdir(repo):
+        return ""
+    try:
+        return subprocess.check_output(["git", "-C", repo, *args], text=True, stderr=subprocess.DEVNULL, timeout=2).strip()
+    except Exception:
+        return ""
+
+
+def _repo_info(repo):
+    exists = bool(repo and os.path.isdir(repo))
+    info = {
+        "path": repo,
+        "exists": exists,
+        "branch": "",
+        "dirty": False,
+        "last_commit": "",
+        "last_commit_ts": None,
+        "language": "",
+    }
+    if not exists:
+        return info
+
+    info["branch"] = _run_git(repo, ["rev-parse", "--abbrev-ref", "HEAD"])
+    info["dirty"] = bool(_run_git(repo, ["status", "--porcelain"]))
+    info["last_commit"] = _run_git(repo, ["log", "-1", "--pretty=%h %s"])
+    ts = _run_git(repo, ["log", "-1", "--pretty=%ct"])
+    if ts.isdigit():
+        info["last_commit_ts"] = int(ts)
+
+    markers = [
+        ("go.mod", "Go"),
+        ("Cargo.toml", "Rust"),
+        ("package.json", "Node"),
+        ("pyproject.toml", "Python"),
+        ("pubspec.yaml", "Flutter/Dart"),
+    ]
+    for marker, lang in markers:
+        if os.path.exists(os.path.join(repo, marker)):
+            info["language"] = lang
+            break
+    return info
+
+
+def _session_matches_workspace(row, terms):
+    text = " ".join(str(row.get(k) or "") for k in ("title", "id", "source", "model")).lower()
+    return any(term.lower() in text for term in terms)
+
+
+def workspace_data():
+    config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "workspaces.json")
+    try:
+        with open(config_path) as f:
+            config = json.load(f)
+    except Exception:
+        config = {"workspaces": []}
+
+    sessions = []
+    conn = safe_read_db(DB_STATE)
+    if conn:
+        try:
+            sessions = [dict(r) for r in conn.execute("""
+                SELECT id, source, model, started_at, ended_at, message_count, tool_call_count,
+                       input_tokens, output_tokens, cache_read_tokens, title
+                FROM sessions
+                WHERE source = 'discord'
+                ORDER BY started_at DESC
+                LIMIT 250
+            """).fetchall()]
+        except Exception:
+            sessions = []
+        finally:
+            conn.close()
+
+    result = []
+    now = time.time()
+    for ws in config.get("workspaces", []):
+        terms = ws.get("terms", []) + [ws.get("key", ""), ws.get("name", "")]
+        matched = [s for s in sessions if _session_matches_workspace(s, terms)]
+        latest = matched[0] if matched else None
+        repo = _repo_info(ws.get("repo", ""))
+        last_activity = latest.get("started_at") if latest else repo.get("last_commit_ts")
+        stale_days = None
+        if last_activity:
+            stale_days = round((now - float(last_activity)) / 86400, 1)
+        result.append({
+            **ws,
+            "repo_info": repo,
+            "sessions": len(matched),
+            "messages": sum(int(s.get("message_count") or 0) for s in matched),
+            "tools": sum(int(s.get("tool_call_count") or 0) for s in matched),
+            "tokens": {
+                "input": sum(int(s.get("input_tokens") or 0) for s in matched),
+                "output": sum(int(s.get("output_tokens") or 0) for s in matched),
+                "cache": sum(int(s.get("cache_read_tokens") or 0) for s in matched),
+            },
+            "latest_session": latest,
+            "last_activity": last_activity,
+            "stale_days": stale_days,
+        })
+    return result
+
 def get_snapshot():
     return {
         "gateway": gateway_data(),
         "activity": activity_data(),
         "sessions": sessions_data(),
+        "workspaces": workspace_data(),
         "vps": vps_health(),
         "crons": cron_jobs(),
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -286,10 +398,28 @@ class DashboardHandler(BaseHTTPRequestHandler):
         body = json.dumps(data, default=str).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", len(body))
+        self.send_header("Content-Length", str(len(body)))
         self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Cache-Control", "no-store")
         self.end_headers()
-        self.wfile.write(body)
+        if self.command != "HEAD":
+            self.wfile.write(body)
+
+    def _serve_static(self, path, content_type):
+        if os.path.exists(path):
+            with open(path, "rb") as f:
+                body = f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            if self.command != "HEAD":
+                self.wfile.write(body)
+        else:
+            self.send_error(404, "Not Found")
+
+    def do_HEAD(self):
+        self.do_GET()
 
     def do_GET(self):
         parsed = urlparse(self.path)
@@ -298,16 +428,15 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
         if path == "/":
             index = os.path.join(os.path.dirname(os.path.abspath(__file__)), "index.html")
-            if os.path.exists(index):
-                with open(index, "rb") as f:
-                    body = f.read()
-                self.send_response(200)
-                self.send_header("Content-Type", "text/html")
-                self.send_header("Content-Length", len(body))
-                self.end_headers()
-                self.wfile.write(body)
-            else:
-                self.send_error(404, "index.html not found")
+            self._serve_static(index, "text/html; charset=utf-8")
+
+        elif path == "/tokens.css":
+            css = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tokens.css")
+            self._serve_static(css, "text/css; charset=utf-8")
+
+        elif path == "/components.js":
+            js = os.path.join(os.path.dirname(os.path.abspath(__file__)), "components.js")
+            self._serve_static(js, "application/javascript; charset=utf-8")
 
         elif path == "/api/snapshot":
             self.send_json(get_snapshot())
@@ -480,6 +609,6 @@ if __name__ == "__main__":
     for agent in ["orchestrator", "analyst", "writer", "marketer", "coder"]:
         os.makedirs(os.path.join(CONTENT_DIR, agent), exist_ok=True)
 
-    server = ThreadingHTTPServer(("127.0.0.1", 51763), DashboardHandler)
-    print("Dashboard server running on http://127.0.0.1:51763")
+    server = ThreadingHTTPServer(("0.0.0.0", 8888), DashboardHandler)
+    print("Dashboard server running on http://0.0.0.0:8888")
     server.serve_forever()

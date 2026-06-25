@@ -1,0 +1,67 @@
+{
+  "workspaces": [
+    {
+      "key": "infra",
+      "label": "INFRA",
+      "name": "Infra / AgentOS",
+      "discord": "#infra",
+      "repo": "/home/rocky/agentos-mission-control",
+      "description": "Hermes, AgentOS dashboard, Tailscale, gateway, host services",
+      "terms": ["agentos", "dashboard", "tailscale", "infra", "hermes"]
+    },
+    {
+      "key": "aegis",
+      "label": "AEGIS",
+      "name": "Aegis",
+      "discord": "#aegis",
+      "repo": "/home/rocky/repos/Aegis",
+      "description": "Go Briar-like decentralized chat over Tor/BT/WiFi. Android first.",
+      "terms": ["aegis", "tor", "briar", "android"]
+    },
+    {
+      "key": "sideband",
+      "label": "SIDE",
+      "name": "Sideband",
+      "discord": "#sideband",
+      "repo": "/home/rocky/repos/sideband",
+      "description": "Rust chat over Tor using Arti, Flutter GUI, Android port direction.",
+      "terms": ["sideband", "arti", "flutter", "rust"]
+    },
+    {
+      "key": "evilsdr",
+      "label": "SDR",
+      "name": "evilSDR",
+      "discord": "#evilsdr",
+      "repo": "/home/rocky/repos/evilSDR",
+      "description": "SDR/Skywarn tooling and GUI work.",
+      "terms": ["evilsdr", "sdr", "skywarn", "radio"]
+    },
+    {
+      "key": "evilhotkeys",
+      "label": "GW2",
+      "name": "evilhotkeys",
+      "discord": "GW2 / evilhotkeys threads",
+      "repo": "/home/rocky/repos/evilhotkeys",
+      "description": "Python Guild Wars 2 macro/spec automation and pixel-state debugging.",
+      "terms": ["evilhotkeys", "gw2", "mechanist", "fishing", "metabattle", "rotation"]
+    },
+    {
+      "key": "elemta",
+      "label": "MTA",
+      "name": "Elemta",
+      "discord": "mail / elemta threads",
+      "repo": "/home/rocky/repos/elemta",
+      "description": "Go MTA/email infrastructure work, observability, security, LDAP, queues.",
+      "terms": ["elemta", "mta", "smtp", "ldap", "queue", "rspamd"]
+    },
+    {
+      "key": "evilapi",
+      "label": "API",
+      "name": "evilapi",
+      "discord": "infra / API threads",
+      "repo": "/home/rocky/repos/evilapi",
+      "description": "Node/API infrastructure and hosted services.",
+      "terms": ["evilapi", "api", "gmail", "hostnames"]
+    }
+  ]
+}

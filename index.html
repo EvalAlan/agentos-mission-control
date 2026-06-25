@@ -571,7 +571,7 @@
   </div>
   <div class="nav-tabs" id="navTabs">
     <button class="nav-tab active" data-tab="overview">Overview</button>
-    <button class="nav-tab" data-tab="agents">Agents</button>
+    <button class="nav-tab" data-tab="agents">Workspaces</button>
     <button class="nav-tab" data-tab="tasks">Tasks</button>
     <button class="nav-tab" data-tab="schedule">Schedule</button>
     <button class="nav-tab" data-tab="content">Content</button>
@@ -602,11 +602,11 @@
     <div class="grid-2" id="overviewBottom"></div>
   </div>
 
-  <!-- AGENTS TAB -->
+  <!-- WORKSPACES TAB -->
   <div class="tab-panel" id="tab-agents">
-    <div class="section-eyebrow">SUBAGENTS</div>
+    <div class="section-eyebrow">WORKSPACES</div>
     <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:var(--space-4);">
-      <div class="section-heading">The Crew.</div>
+      <div class="section-heading">Repos + Discord lanes.</div>
       <div id="agentCounts"></div>
     </div>
     <div class="grid-5" id="agentCards" style="margin-bottom:var(--space-4);"></div>
@@ -614,16 +614,16 @@
     <div class="glass-card" style="padding: var(--space-4); max-height: 420px; overflow-y: auto; position: relative;">
       <div class="scan-line" style="animation-duration:10s;"></div>
       <table class="log-table">
-        <thead><tr><th>Time</th><th>Agent</th><th>Task</th><th>Model</th><th>Status</th></tr></thead>
+        <thead><tr><th>Last</th><th>Lane</th><th>Workspace</th><th>Repo</th><th>Sessions</th></tr></thead>
         <tbody id="logBody"></tbody>
       </table>
     </div>
     <div style="margin-top:var(--space-4);">
-      <div class="section-eyebrow">Agent Statistics</div>
+      <div class="section-eyebrow">Workspace Statistics</div>
       <div style="display:grid; grid-template-columns: 1fr 300px; gap:var(--space-4); margin-top:var(--space-3);">
         <div class="grid-2" id="agentStats" style="grid-template-columns: 1fr 1fr;"></div>
         <div class="glass-card" style="padding:var(--space-4);">
-          <div class="section-eyebrow" style="margin-bottom:var(--space-3);">TASK DISTRIBUTION</div>
+          <div class="section-eyebrow" style="margin-bottom:var(--space-3);">SESSION DISTRIBUTION</div>
           <div style="display:flex;justify-content:center;"><canvas id="donutCanvas" width="130" height="130" style="width:130px;height:130px;"></canvas></div>
           <div id="donutLegend" style="margin-top:var(--space-3);"></div>
         </div>
@@ -1106,97 +1106,95 @@ function renderOverview(d) {
 // ══════════════════════════════════════════════════════════════
 function renderAgents(d) {
   if (!d) return;
-  const ag = d.activity.agents || {};
-  const entries = d.activity.entries || [];
-  const totals = d.activity.totals || { total: 0, completed: 0, failed: 0 };
-  const totalResp = Math.max(totals.total, 1);
-
-  const active = Object.values(ag).filter(a => (a.total||0) > 0).length;
-  const idle = Object.keys(AGENTS).length - active;
+  const workspaces = (d.workspaces || []).slice().sort((a,b) => (b.sessions||0) - (a.sessions||0));
+  const totalSessions = Math.max(workspaces.reduce((sum, w) => sum + (w.sessions || 0), 0), 1);
+  const active = workspaces.filter(w => (w.sessions || 0) > 0).length;
+  const dirty = workspaces.filter(w => w.repo_info && w.repo_info.dirty).length;
 
   document.getElementById('agentCounts').innerHTML = GlassCard({
     children: `<div style="display:flex;gap:var(--space-4);">
       <div style="text-align:center;"><div style="font:700 var(--font-size-lg) var(--font-mono);color:var(--status-active);text-shadow:0 0 15px rgba(94,226,181,0.4);">${active}</div><div style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);">Active</div></div>
-      <div style="text-align:center;"><div style="font:700 var(--font-size-lg) var(--font-mono);color:var(--status-idle);">${idle}</div><div style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);">Idle</div></div>
+      <div style="text-align:center;"><div style="font:700 var(--font-size-lg) var(--font-mono);color:${dirty ? 'var(--brand-amber)' : 'var(--status-idle)'};">${dirty}</div><div style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);">Dirty Repos</div></div>
     </div>`,
     style: 'padding: var(--space-3);'
   });
 
-  document.getElementById('agentCards').innerHTML = Object.entries(AGENTS).map(([key, cfg], idx) => {
-    const a = ag[key] || { total: 0, completed: 0, failed: 0, last_task: '', last_seen: '', model: '' };
-    const successPct = a.total > 0 ? Math.round((a.completed / a.total) * 100) : 100;
-    const successColor = successPct === 100 ? 'var(--status-active)' : successPct >= 80 ? 'var(--status-idle)' : 'var(--status-error)';
-    const loadPct = (a.total / totalResp) * 100;
-    const dayCounts = {};
-    entries.forEach(e => {
-      if (e.agent_name === key) {
-        try { dayCounts[e.created_at.slice(0,10)] = (dayCounts[e.created_at.slice(0,10)]||0) + 1; } catch(ex) {}
-      }
-    });
-    const days = Object.values(dayCounts).slice(-7);
+  const palette = ['var(--brand-violet)','var(--brand-cyan)','var(--brand-gold)','var(--brand-magenta)','var(--brand-teal)','var(--status-active)','var(--brand-amber)'];
+  document.getElementById('agentCards').innerHTML = workspaces.map((w, idx) => {
+    const color = palette[idx % palette.length];
+    const repo = w.repo_info || {};
+    const sessionPct = ((w.sessions || 0) / totalSessions) * 100;
+    const statusColor = repo.exists ? (repo.dirty ? 'var(--brand-amber)' : 'var(--status-active)') : 'var(--status-error)';
+    const statusText = repo.exists ? (repo.dirty ? 'dirty' : 'clean') : 'missing';
+    const latest = w.latest_session || {};
+    const lastLabel = w.last_activity ? relativeUnix(w.last_activity) : 'never';
+    const branch = repo.branch || '—';
+    const language = repo.language || 'repo';
 
-    return `<div class="agent-card dissolve-in" style="--agent-color:${cfg.color};${staggerDelay(idx)}">
+    return `<div class="agent-card dissolve-in" style="--agent-color:${color};${staggerDelay(idx)}">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-2);">
-        ${Badge({ text: cfg.label, color: cfg.color, variant: 'solid' })}
+        ${Badge({ text: w.label || w.key?.slice(0,4).toUpperCase() || 'WORK', color, variant: 'solid' })}
         <div style="display:flex;align-items:center;gap:var(--space-2);">
-          <span style="font:400 var(--font-size-xs) var(--font-mono);color:var(--brand-cyan);">${cfg.platform}</span>
-          <div style="width:6px;height:6px;border-radius:50%;background:${a.total > 0 ? 'var(--status-active)' : 'var(--status-dormant)'};box-shadow:0 0 8px ${a.total > 0 ? 'var(--status-active)' : 'transparent'};${a.total > 0 ? 'animation:pulse 2s ease infinite;' : ''}"></div>
+          <span style="font:400 var(--font-size-xs) var(--font-mono);color:var(--brand-cyan);">${w.discord || 'Discord'}</span>
+          <div style="width:6px;height:6px;border-radius:50%;background:${statusColor};box-shadow:0 0 8px ${statusColor};${w.sessions > 0 ? 'animation:pulse 2s ease infinite;' : ''}"></div>
         </div>
       </div>
-      <div style="font:500 var(--font-size-lg) var(--font-display);margin-bottom:2px;">${cfg.name}</div>
-      <div style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);margin-bottom:var(--space-2);">${cfg.role}</div>
-      ${ThinBar({ values: days.length > 0 ? days : [0,0,0,0,0,0,0], color: cfg.color })}
+      <div style="font:500 var(--font-size-lg) var(--font-display);margin-bottom:2px;">${w.name}</div>
+      <div style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);margin-bottom:var(--space-2);min-height:34px;">${w.description || ''}</div>
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-2);margin-top:var(--space-2);">
-        <div><div style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);">Responses</div><div style="font:500 var(--font-size-sm) var(--font-mono);">${a.total}</div></div>
-        <div><div style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);">Success%</div><div style="font:500 var(--font-size-sm) var(--font-mono);color:${successColor};">${successPct}%</div></div>
-        <div><div style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);">Model</div><div style="font:500 var(--font-size-sm) var(--font-mono);color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${a.model}">${a.model || '—'}</div></div>
+        <div><div style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);">Sessions</div><div style="font:500 var(--font-size-sm) var(--font-mono);">${w.sessions || 0}</div></div>
+        <div><div style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);">Branch</div><div style="font:500 var(--font-size-sm) var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${branch}">${branch}</div></div>
+        <div><div style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);">Repo</div><div style="font:500 var(--font-size-sm) var(--font-mono);color:${statusColor};">${statusText}</div></div>
       </div>
-      <div style="margin-top:var(--space-2);">${ProgressBar({ pct: loadPct, color: cfg.color, height: '3px' })}</div>
-      ${a.last_task ? `<div style="margin-top:var(--space-2);font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);">↳ ${a.last_task.slice(0,50)}<br>${relativeTime(a.last_seen)}</div>` : ''}
+      <div style="margin-top:var(--space-2);">${ProgressBar({ pct: sessionPct, color, height: '3px' })}</div>
+      <div style="margin-top:var(--space-2);display:flex;justify-content:space-between;gap:var(--space-2);font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);">
+        <span>${language}</span><span>${lastLabel}</span>
+      </div>
+      ${latest.title ? `<div style="margin-top:var(--space-2);font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${latest.title}">↳ ${latest.title}</div>` : ''}
+      ${repo.last_commit ? `<div style="margin-top:4px;font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${repo.last_commit}">git ${repo.last_commit}</div>` : ''}
     </div>`;
   }).join('');
 
-  const agentNames = ['ALL', ...Object.keys(AGENTS).map(k => AGENTS[k].label)];
-  document.getElementById('logFilters').innerHTML = agentNames.map((name, i) => {
-    const filter = i === 0 ? 'all' : Object.keys(AGENTS)[i-1];
+  const filters = ['ALL', ...workspaces.map(w => w.label || w.key.toUpperCase())];
+  document.getElementById('logFilters').innerHTML = filters.map((name, i) => {
+    const filter = i === 0 ? 'all' : workspaces[i-1].key;
     return `<button class="filter-btn ${i===0?'active':''}" data-filter="${filter}">${name}</button>`;
   }).join('');
   document.querySelectorAll('.filter-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
-      renderLogTable(entries, btn.dataset.filter);
+      renderWorkspaceTable(workspaces, btn.dataset.filter);
     });
   });
-  renderLogTable(entries, 'all');
+  renderWorkspaceTable(workspaces, 'all');
 
-  const weekTotal = byDaySum(d.activity.by_day);
-  const todayTotal = d.activity.by_day?.length > 0 ? d.activity.by_day[d.activity.by_day.length-1].total : 0;
-  const mostActive = Object.entries(ag).sort((a,b) => (b[1].total||0) - (a[1].total||0))[0];
-  const successRate = totals.total > 0 ? Math.round((totals.completed / totals.total) * 100) : 100;
-  const srColor = successRate >= 90 ? 'var(--status-active)' : successRate >= 70 ? 'var(--status-idle)' : 'var(--status-error)';
+  const totalMessages = workspaces.reduce((sum, w) => sum + (w.messages || 0), 0);
+  const totalTools = workspaces.reduce((sum, w) => sum + (w.tools || 0), 0);
+  const topWorkspace = workspaces[0];
+  const existingRepos = workspaces.filter(w => w.repo_info && w.repo_info.exists).length;
 
   document.getElementById('agentStats').innerHTML = [
-    StatCard({ label: 'TASKS TODAY', value: todayTotal, accent: 'var(--status-warning)', barWidth: '100%' }),
-    StatCard({ label: 'TASKS THIS WEEK', value: weekTotal, accent: 'var(--brand-cyan)', barWidth: '100%' }),
-    StatCard({ label: 'MOST ACTIVE', value: mostActive ? AGENTS[mostActive[0]]?.label || mostActive[0] : '—', accent: mostActive ? AGENTS[mostActive[0]]?.color || 'var(--text-muted)' : 'var(--text-muted)', barWidth: mostActive ? Math.round((mostActive[1].total/totalResp)*100)+'%' : '0%' }),
-    StatCard({ label: 'SUCCESS RATE', value: successRate + '%', accent: srColor, barWidth: successRate + '%' }),
+    StatCard({ label: 'WORKSPACES', value: workspaces.length, accent: 'var(--brand-cyan)', barWidth: '100%' }),
+    StatCard({ label: 'DISCORD SESSIONS', value: totalSessions, accent: 'var(--brand-violet)', barWidth: '100%' }),
+    StatCard({ label: 'MESSAGES', value: totalMessages, accent: 'var(--brand-gold)', barWidth: '100%' }),
+    StatCard({ label: 'REPOS FOUND', value: `${existingRepos}/${workspaces.length}`, accent: existingRepos === workspaces.length ? 'var(--status-active)' : 'var(--brand-amber)', barWidth: Math.round((existingRepos / Math.max(workspaces.length, 1))*100)+'%' }),
   ].join('');
 
   requestAnimationFrame(() => {
     const canvas = document.getElementById('donutCanvas');
     if (!canvas) return;
-    const slices = Object.entries(AGENTS).map(([key, cfg]) => ({
-      color: getComputedStyle(document.documentElement).getPropertyValue('--agent-' + key).trim() || cfg.color,
-      value: (ag[key] || {}).total || 0,
-      label: cfg.label,
+    const slices = workspaces.map((w, idx) => ({
+      color: palette[idx % palette.length],
+      value: w.sessions || 0,
+      label: w.label || w.key,
     }));
     canvas.dataset.slices = JSON.stringify(slices);
-    canvas.dataset.total = totalResp;
+    canvas.dataset.total = totalSessions;
     drawDonut(canvas);
 
     document.getElementById('donutLegend').innerHTML = slices.map(s => {
-      const pct = totalResp > 0 ? Math.round((s.value / totalResp) * 100) : 0;
+      const pct = totalSessions > 0 ? Math.round((s.value / totalSessions) * 100) : 0;
       return `<div style="display:flex;align-items:center;justify-content:space-between;padding:3px 0;">
         <div style="display:flex;align-items:center;gap:var(--space-2);">
           <div style="width:8px;height:8px;border-radius:50%;background:${s.color};box-shadow:0 0 8px ${s.color};"></div>
@@ -1206,6 +1204,31 @@ function renderAgents(d) {
       </div>`;
     }).join('');
   });
+}
+
+function relativeUnix(ts) {
+  if (!ts) return 'never';
+  const seconds = Number(ts) > 100000000000 ? Number(ts) / 1000 : Number(ts);
+  const diff = (Date.now() / 1000) - seconds;
+  if (diff < 60) return `${Math.max(0, Math.floor(diff))}s ago`;
+  if (diff < 3600) return `${Math.floor(diff/60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff/3600)}h ago`;
+  return `${Math.floor(diff/86400)}d ago`;
+}
+
+function renderWorkspaceTable(workspaces, filter) {
+  const filtered = filter === 'all' ? workspaces : workspaces.filter(w => w.key === filter);
+  document.getElementById('logBody').innerHTML = filtered.map((w, i) => {
+    const repo = w.repo_info || {};
+    const color = repo.exists ? (repo.dirty ? 'var(--brand-amber)' : 'var(--status-active)') : 'var(--status-error)';
+    return `<tr class="dissolve-in" style="${staggerDelay(i)}">
+      <td style="color:var(--text-muted);">${w.last_activity ? relativeUnix(w.last_activity) : 'never'}</td>
+      <td>${Badge({ text: w.label || w.key?.slice(0,4).toUpperCase() || 'WORK', color: 'var(--brand-cyan)', variant: 'solid' })}</td>
+      <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${w.description || ''}">${w.name}</td>
+      <td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:${color};" title="${repo.path || ''}">${repo.branch || '—'} ${repo.dirty ? '• dirty' : ''}</td>
+      <td>${w.sessions || 0} / ${w.messages || 0} msgs / ${w.tools || 0} tools</td>
+    </tr>`;
+  }).join('');
 }
 
 function byDaySum(days) {
@@ -1233,7 +1256,7 @@ function renderLogTable(entries, filter) {
 let boardData = [];
 async function loadTasks() {
   try {
-    const res = await fetch('/api/board');
+    const res = await fetch('api/board');
     boardData = await res.json();
   } catch(e) { boardData = []; }
   renderTaskBoard();
@@ -1287,18 +1310,18 @@ window.submitTask = async function() {
   if (!title) return;
   const priority = document.getElementById('newTaskPriority').value;
   const notes = document.getElementById('newTaskNotes').value.trim();
-  await fetch('/api/board', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ title, priority, notes }) });
+  await fetch('api/board', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ title, priority, notes }) });
   document.getElementById('addTaskContainer').innerHTML = '';
   loadTasks();
 };
 
 window.moveTask = async function(id, newStatus) {
-  await fetch('/api/board/update?id=' + id, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ status: newStatus }) });
+  await fetch('api/board/update?id=' + id, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ status: newStatus }) });
   loadTasks();
 };
 
 window.deleteTask = async function(id) {
-  await fetch('/api/board/delete?id=' + id, { method: 'POST' });
+  await fetch('api/board/delete?id=' + id, { method: 'POST' });
   loadTasks();
 };
 
@@ -1342,7 +1365,7 @@ let selectedDoc = null;
 
 async function loadContentDocs() {
   try {
-    const res = await fetch('/api/content');
+    const res = await fetch('api/content');
     contentDocs = await res.json();
   } catch(e) { contentDocs = []; }
   renderContentSidebar();
@@ -1378,7 +1401,7 @@ window.selectDoc = async function(agent, filename) {
   selectedDoc = { agent, filename };
   renderContentSidebar();
   try {
-    const res = await fetch('/api/content/get?path=' + encodeURIComponent(filename));
+    const res = await fetch('api/content/get?path=' + encodeURIComponent(filename));
     const data = await res.json();
     const cfg = AGENTS[agent] || { color: 'var(--text-muted)' };
     const doc = contentDocs.find(d => d.filename === filename && d.agent === agent);
@@ -1425,7 +1448,7 @@ window.showEditMode = function() {
 
 window.saveContent = async function() {
   const content = document.getElementById('editTextarea').value;
-  await fetch('/api/content/save', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ path: window._currentPath, content }) });
+  await fetch('api/content/save', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ path: window._currentPath, content }) });
   window._currentContent = content;
   showViewMode();
   loadContentDocs();
@@ -1438,7 +1461,7 @@ let lastSnapshot = null;
 
 async function fetchSnapshot() {
   try {
-    const res = await fetch('/api/snapshot');
+    const res = await fetch('api/snapshot');
     lastSnapshot = await res.json();
     if (currentTab === 'overview') renderOverview(lastSnapshot);
     if (currentTab === 'agents') renderAgents(lastSnapshot);
@@ -1448,7 +1471,7 @@ async function fetchSnapshot() {
 
 function startSSE() {
   try {
-    const evtSource = new EventSource('/events');
+    const evtSource = new EventSource('events');
     evtSource.onmessage = (e) => {
       try {
         lastSnapshot = JSON.parse(e.data);
