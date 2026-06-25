@@ -40,7 +40,6 @@ def init_board_db():
         now = datetime.now(timezone.utc).isoformat()
         seeds = [
             ("infra-agentos", "Finish AgentOS dashboard wiring", "in_progress", "high", "Backed by Hermes sessions, ~/repos, and Tailscale Serve", now),
-            ("aegis-android", "Aegis Android-first planning", "pending", "high", "Go Briar-like decentralized chat over Tor/BT/WiFi", now),
             ("evilhotkeys-gw2", "evilhotkeys GW2 spec maintenance", "pending", "medium", "Pixel-state debugging, fishing/manual pool workflow, mechanist/untamed specs", now),
             ("elemta-work", "Elemta MTA backlog", "pending", "medium", "Go MTA, observability, LDAP, queue/security work", now),
             ("evilsdr-work", "evilSDR/Skywarn backlog", "pending", "medium", "SDR tooling, scan hits, GUI polish", now),

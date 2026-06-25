@@ -7,16 +7,13 @@
       "discord": "#infra",
       "repo": "/home/rocky/agentos-mission-control",
       "description": "Hermes, AgentOS dashboard, Tailscale, gateway, host services",
-      "terms": ["agentos", "dashboard", "tailscale", "infra", "hermes"]
-    },
-    {
-      "key": "aegis",
-      "label": "AEGIS",
-      "name": "Aegis",
-      "discord": "#aegis",
-      "repo": "/home/rocky/repos/Aegis",
-      "description": "Go Briar-like decentralized chat over Tor/BT/WiFi. Android first.",
-      "terms": ["aegis", "tor", "briar", "android"]
+      "terms": [
+        "agentos",
+        "dashboard",
+        "tailscale",
+        "infra",
+        "hermes"
+      ]
     },
     {
       "key": "sideband",
@@ -25,7 +22,12 @@
       "discord": "#sideband",
       "repo": "/home/rocky/repos/sideband",
       "description": "Rust chat over Tor using Arti, Flutter GUI, Android port direction.",
-      "terms": ["sideband", "arti", "flutter", "rust"]
+      "terms": [
+        "sideband",
+        "arti",
+        "flutter",
+        "rust"
+      ]
     },
     {
       "key": "evilsdr",
@@ -34,7 +36,12 @@
       "discord": "#evilsdr",
       "repo": "/home/rocky/repos/evilSDR",
       "description": "SDR/Skywarn tooling and GUI work.",
-      "terms": ["evilsdr", "sdr", "skywarn", "radio"]
+      "terms": [
+        "evilsdr",
+        "sdr",
+        "skywarn",
+        "radio"
+      ]
     },
     {
       "key": "evilhotkeys",
@@ -43,7 +50,14 @@
       "discord": "GW2 / evilhotkeys threads",
       "repo": "/home/rocky/repos/evilhotkeys",
       "description": "Python Guild Wars 2 macro/spec automation and pixel-state debugging.",
-      "terms": ["evilhotkeys", "gw2", "mechanist", "fishing", "metabattle", "rotation"]
+      "terms": [
+        "evilhotkeys",
+        "gw2",
+        "mechanist",
+        "fishing",
+        "metabattle",
+        "rotation"
+      ]
     },
     {
       "key": "elemta",
@@ -52,7 +66,14 @@
       "discord": "mail / elemta threads",
       "repo": "/home/rocky/repos/elemta",
       "description": "Go MTA/email infrastructure work, observability, security, LDAP, queues.",
-      "terms": ["elemta", "mta", "smtp", "ldap", "queue", "rspamd"]
+      "terms": [
+        "elemta",
+        "mta",
+        "smtp",
+        "ldap",
+        "queue",
+        "rspamd"
+      ]
     },
     {
       "key": "evilapi",
@@ -61,7 +82,12 @@
       "discord": "infra / API threads",
       "repo": "/home/rocky/repos/evilapi",
       "description": "Node/API infrastructure and hosted services.",
-      "terms": ["evilapi", "api", "gmail", "hostnames"]
+      "terms": [
+        "evilapi",
+        "api",
+        "gmail",
+        "hostnames"
+      ]
     }
   ]
 }

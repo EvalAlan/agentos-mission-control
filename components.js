@@ -71,21 +71,39 @@ export function drawDonut(canvas) {
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
   const slices = JSON.parse(canvas.dataset.slices || '[]');
-  const total = parseInt(canvas.dataset.total || '0');
+  const total = Number(canvas.dataset.total || '0');
   const w = canvas.width, h = canvas.height;
   const cx = w / 2, cy = h / 2, r = w * 0.42, lw = w * 0.12;
 
+  const resolveColor = (color) => {
+    if (!color || !color.startsWith('var(')) return color || '#7DD3FC';
+    const name = color.slice(4, -1).trim();
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#7DD3FC';
+  };
+
   ctx.clearRect(0, 0, w, h);
-  if (total === 0) return;
+  ctx.lineCap = 'round';
+
+  if (!total || slices.every(s => !s.value)) {
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.lineWidth = lw;
+    ctx.strokeStyle = 'rgba(125,211,252,0.18)';
+    ctx.stroke();
+    return;
+  }
 
   let angle = -Math.PI / 2;
-  slices.forEach(s => {
+  slices.filter(s => s.value > 0).forEach(s => {
     const sliceAngle = (s.value / total) * 2 * Math.PI;
     ctx.beginPath();
     ctx.arc(cx, cy, r, angle, angle + sliceAngle);
     ctx.lineWidth = lw;
-    ctx.strokeStyle = s.color;
+    ctx.strokeStyle = resolveColor(s.color);
+    ctx.shadowColor = resolveColor(s.color);
+    ctx.shadowBlur = 8;
     ctx.stroke();
+    ctx.shadowBlur = 0;
     angle += sliceAngle;
   });
 }

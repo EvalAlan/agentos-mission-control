@@ -933,55 +933,71 @@ function staggerDelay(index) {
 // ══════════════════════════════════════════════════════════════
 function renderOverview(d) {
   if (!d) return;
-  const ag = d.activity.agents || {};
-  const totals = d.activity.totals || { total: 0, completed: 0, failed: 0 };
   const vps = d.vps || {};
   const sessions = d.sessions || {};
   const gw = d.gateway || {};
-  const byDay = d.activity.by_day || [];
-  const entries = d.activity.entries || [];
+  const workspaces = (d.workspaces || []).slice().sort((a,b) => (b.sessions||0) - (a.sessions||0));
+  const palette = ['var(--brand-violet)','var(--brand-cyan)','var(--brand-gold)','var(--brand-magenta)','var(--brand-teal)','var(--status-active)'];
 
-  const agentEntries = Object.entries(AGENTS);
-  const totalResp = Math.max(totals.total, 1);
-  const radarDots = agentEntries.map(([key, cfg], i) => {
-    const count = (ag[key] || {}).total || 0;
-    const angle = (i / agentEntries.length) * 2 * Math.PI - Math.PI/2;
-    const r = 40 + (count / totalResp) * 20;
-    const x = 70 + Math.cos(angle) * r;
-    const y = 70 + Math.sin(angle) * r;
-    return `<circle cx="${x}" cy="${y}" r="4" fill="${cfg.color}" opacity="0.9"><animate attributeName="r" values="4;5;4" dur="3s" repeatCount="indefinite" begin="${i*0.5}s"/></circle>`;
-  }).join('');
-
-  const directive = entries.length > 0
-    ? `${(entries[0].agent_name||'').toUpperCase()} · ${entries[0].task_description || ''}`
-    : 'No recent activity';
-
-  const contextBars = agentEntries.map(([key, cfg]) => {
-    const a = ag[key] || {};
-    const fill = Math.min(100, ((a.total || 0) / totalResp) * 100);
-    return `<div style="display:flex;align-items:center;gap:var(--space-2);margin-bottom:4px;">
-      <span style="font:400 var(--font-size-xs) var(--font-mono);color:${cfg.color};width:50px;">${cfg.label}</span>
-      <div style="flex:1;">${ProgressBar({ pct: fill, color: cfg.color, height: '4px' })}</div>
-      <span style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);">${(a.total||0)}</span>
-    </div>`;
-  }).join('');
+  const totalWorkspaceSessions = workspaces.reduce((sum, w) => sum + (w.sessions || 0), 0);
+  const totalMessages = workspaces.reduce((sum, w) => sum + (w.messages || 0), 0);
+  const totalTools = workspaces.reduce((sum, w) => sum + (w.tools || 0), 0);
+  const dirtyRepos = workspaces.filter(w => w.repo_info && w.repo_info.dirty).length;
+  const reposFound = workspaces.filter(w => w.repo_info && w.repo_info.exists).length;
+  const activeWorkspaces = workspaces.filter(w => (w.sessions || 0) > 0).length;
+  const topWorkspace = workspaces[0];
+  const latestWorkspace = workspaces.slice().sort((a,b) => (b.last_activity || 0) - (a.last_activity || 0))[0];
 
   const cpuColor = vps.cpu > 85 ? 'var(--brand-red)' : vps.cpu > 70 ? 'var(--brand-amber)' : 'var(--brand-cyan)';
   const ramColor = vps.ram_pct > 85 ? 'var(--brand-red)' : vps.ram_pct > 70 ? 'var(--brand-amber)' : 'var(--brand-cyan)';
   const diskColor = vps.disk_pct > 85 ? 'var(--brand-red)' : vps.disk_pct > 70 ? 'var(--brand-amber)' : 'var(--brand-cyan)';
-  let dbSize = 0;
-  try { dbSize = vps._dbSize || 0; } catch(e) {}
-  const errors = totals.failed || 0;
-  const errorsColor = errors === 0 ? 'var(--status-active)' : 'var(--brand-red)';
   const uptime = gw.uptime || 'N/A';
-  const sparkData = byDay.map(d => d.total);
 
-  const feedHtml = entries.slice(0, 8).map((e, i) => {
-    const cfg = AGENTS[e.agent_name] || { color: 'var(--text-muted)', label: (e.agent_name||'?').slice(0,4).toUpperCase() };
-    return `<div class="dissolve-in" style="display:flex;align-items:center;gap:var(--space-2);padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.04);${staggerDelay(i)}">
-      ${Badge({ text: cfg.label, color: cfg.color, variant: 'solid' })}
-      <span style="font:400 var(--font-size-sm) var(--font-mono);color:var(--text-primary);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${e.task_description || ''}</span>
-      <span style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);">${relativeTime(e.created_at)}</span>
+  const maxSessions = Math.max(...workspaces.map(w => w.sessions || 0), 1);
+  const radarDots = workspaces.map((w, i) => {
+    const angle = (i / Math.max(workspaces.length, 1)) * 2 * Math.PI - Math.PI/2;
+    const r = 28 + ((w.sessions || 0) / maxSessions) * 34;
+    const x = 70 + Math.cos(angle) * r;
+    const y = 70 + Math.sin(angle) * r;
+    const color = palette[i % palette.length];
+    return `<g>
+      <circle cx="${x}" cy="${y}" r="${4 + Math.min(4, (w.sessions || 0) / maxSessions * 4)}" fill="${color}" opacity="0.92"><animate attributeName="r" values="4;6;4" dur="3s" repeatCount="indefinite" begin="${i*0.25}s"/></circle>
+      <text x="${x}" y="${y + 16}" text-anchor="middle" fill="var(--text-muted)" style="font: 500 7px var(--font-mono);">${w.label || w.key}</text>
+    </g>`;
+  }).join('');
+
+  const workspaceBars = workspaces.map((w, i) => {
+    const fill = Math.round(((w.sessions || 0) / maxSessions) * 100);
+    const color = palette[i % palette.length];
+    const repo = w.repo_info || {};
+    const repoState = repo.exists ? (repo.dirty ? 'dirty' : 'clean') : 'missing';
+    return `<div style="display:flex;align-items:center;gap:var(--space-2);margin-bottom:6px;">
+      <span style="font:500 var(--font-size-xs) var(--font-mono);color:${color};width:52px;">${w.label || w.key}</span>
+      <div style="flex:1;">${ProgressBar({ pct: fill, color, height: '5px' })}</div>
+      <span style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);width:94px;text-align:right;">${w.sessions || 0} · ${repoState}</span>
+    </div>`;
+  }).join('');
+
+  const recentSessions = (sessions.recent || []).slice(0, 8).map((s, i) => {
+    const title = s.title || s.id || 'untitled session';
+    const source = (s.source || 'session').toUpperCase();
+    return `<div class="dissolve-in" style="display:flex;align-items:center;gap:var(--space-2);padding:7px 0;border-bottom:1px solid rgba(255,255,255,0.04);${staggerDelay(i)}">
+      ${Badge({ text: source.slice(0,4), color: 'var(--brand-cyan)', variant: 'solid' })}
+      <span style="font:400 var(--font-size-sm) var(--font-mono);color:var(--text-primary);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${title}">${title}</span>
+      <span style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);">${relativeUnix(s.started_at)}</span>
+    </div>`;
+  }).join('');
+
+  const repoGrid = workspaces.map((w, i) => {
+    const repo = w.repo_info || {};
+    const color = repo.exists ? (repo.dirty ? 'var(--brand-amber)' : 'var(--status-active)') : 'var(--status-error)';
+    return `<div class="dissolve-in" style="padding:var(--space-3);border:1px solid rgba(255,255,255,0.06);border-radius:var(--radius-md);background:rgba(255,255,255,0.03);${staggerDelay(i)}">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:var(--space-2);margin-bottom:6px;">
+        ${Badge({ text: w.label || w.key, color: palette[i % palette.length], variant: 'solid' })}
+        <span style="font:500 var(--font-size-xs) var(--font-mono);color:${color};">${repo.exists ? (repo.dirty ? 'dirty' : 'clean') : 'missing'}</span>
+      </div>
+      <div style="font:500 var(--font-size-sm) var(--font-display);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${w.name}</div>
+      <div style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${repo.last_commit || repo.path || ''}">${repo.branch || '—'} · ${w.sessions || 0} sessions</div>
     </div>`;
   }).join('');
 
@@ -991,114 +1007,68 @@ function renderOverview(d) {
         <svg viewBox="0 0 140 140" width="180" height="180" style="overflow:visible;">
           <defs>
             <radialGradient id="radarGlow" cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stop-color="var(--brand-violet)" stop-opacity="0.08"/>
+              <stop offset="0%" stop-color="var(--brand-violet)" stop-opacity="0.12"/>
               <stop offset="100%" stop-color="transparent"/>
             </radialGradient>
           </defs>
           <circle cx="70" cy="70" r="65" fill="url(#radarGlow)"/>
-          <circle cx="70" cy="70" r="60" fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="0.5"/>
-          <circle cx="70" cy="70" r="45" fill="none" stroke="rgba(255,255,255,0.04)" stroke-width="0.5"/>
-          <circle cx="70" cy="70" r="30" fill="none" stroke="rgba(255,255,255,0.03)" stroke-width="0.5"/>
-          <circle cx="70" cy="70" r="15" fill="none" stroke="rgba(255,255,255,0.02)" stroke-width="0.5"/>
-          <line x1="10" y1="70" x2="130" y2="70" stroke="rgba(255,255,255,0.03)" stroke-width="0.5"/>
-          <line x1="70" y1="10" x2="70" y2="130" stroke="rgba(255,255,255,0.03)" stroke-width="0.5"/>
-          <g style="transform-origin:70px 70px;animation:sweep 8s linear infinite;">
-            <line x1="70" y1="70" x2="70" y2="10" stroke="var(--brand-cyan)" stroke-width="1.5" opacity="0.5"/>
-            <circle cx="70" cy="12" r="2" fill="var(--brand-cyan)" opacity="0.8"/>
+          <circle cx="70" cy="70" r="60" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="0.5"/>
+          <circle cx="70" cy="70" r="45" fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="0.5"/>
+          <circle cx="70" cy="70" r="30" fill="none" stroke="rgba(255,255,255,0.04)" stroke-width="0.5"/>
+          <line x1="10" y1="70" x2="130" y2="70" stroke="rgba(255,255,255,0.04)" stroke-width="0.5"/>
+          <line x1="70" y1="10" x2="70" y2="130" stroke="rgba(255,255,255,0.04)" stroke-width="0.5"/>
+          <g style="transform-origin:70px 70px;animation:sweep 10s linear infinite;">
+            <line x1="70" y1="70" x2="70" y2="10" stroke="var(--brand-cyan)" stroke-width="1.5" opacity="0.45"/>
           </g>
           ${radarDots}
         </svg>
       </div>
       <div class="ops-column">
-        <div class="ops-label">CURRENT DIRECTIVE</div>
-        <div style="font:400 var(--font-size-sm) var(--font-mono);color:var(--brand-cyan);margin-bottom:var(--space-3);text-shadow:0 0 20px rgba(125,211,252,0.3);">${directive}</div>
-        <div class="ops-label" style="margin-top:var(--space-2);">CONTEXT WINDOW</div>
-        ${contextBars}
+        <div class="ops-label">FOCUS</div>
+        <div style="font:500 var(--font-size-sm) var(--font-mono);color:var(--brand-cyan);margin-bottom:var(--space-3);text-shadow:0 0 20px rgba(125,211,252,0.3);">
+          ${latestWorkspace ? `${latestWorkspace.name} · ${relativeUnix(latestWorkspace.last_activity)}` : 'No workspace activity yet'}
+        </div>
+        <div class="ops-label" style="margin-top:var(--space-2);">WORKSPACE LOAD</div>
+        ${workspaceBars || '<div class="empty-state">No workspaces configured</div>'}
       </div>
       <div class="ops-column">
-        <div class="ops-label">VPS HEALTH</div>
+        <div class="ops-label">HOST HEALTH</div>
         <div style="display:flex;flex-direction:column;gap:var(--space-2);margin-bottom:var(--space-3);">
           <div><div style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);">CPU ${vps.cpu || 0}%</div>${ProgressBar({ pct: vps.cpu || 0, color: cpuColor })}</div>
           <div><div style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);">RAM ${vps.ram_pct || 0}%</div>${ProgressBar({ pct: vps.ram_pct || 0, color: ramColor })}</div>
           <div><div style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);">DISK ${vps.disk_pct || 0}%</div>${ProgressBar({ pct: vps.disk_pct || 0, color: diskColor })}</div>
         </div>
-        <div class="ops-label">HERMES DBs</div>
-        <div style="font:500 var(--font-size-sm) var(--font-mono);color:var(--brand-gold);text-shadow:0 0 15px rgba(251,191,36,0.3);">${formatBytes(dbSize)}</div>
+        <div class="ops-label">TAILNET SERVE</div>
+        <div style="font:500 var(--font-size-sm) var(--font-mono);color:var(--brand-gold);text-shadow:0 0 15px rgba(251,191,36,0.3);">/agentos/ · ${uptime}</div>
       </div>
     </div>
     <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:var(--space-3);margin-top:var(--space-4);">
-      <div style="text-align:center;"><div class="ops-label">QUEUE</div><div style="font:700 var(--font-size-lg) var(--font-mono);text-shadow:0 0 15px rgba(139,92,246,0.3);">${totals.total}</div></div>
-      <div style="text-align:center;"><div class="ops-label">SESSIONS</div><div style="font:700 var(--font-size-lg) var(--font-mono);">${sessions.count || 0}</div></div>
-      <div style="text-align:center;"><div class="ops-label">ERRORS</div><div style="font:700 var(--font-size-lg) var(--font-mono);color:${errorsColor};text-shadow:0 0 15px ${errors === 0 ? 'rgba(94,226,181,0.3)' : 'rgba(242,109,109,0.3)'};">${errors}</div></div>
-      <div style="text-align:center;"><div class="ops-label">TODAY</div><div style="font:700 var(--font-size-lg) var(--font-mono);">${byDay.length > 0 ? byDay[byDay.length-1].total : 0}</div></div>
-      <div style="text-align:center;"><div class="ops-label">UPTIME</div><div style="font:700 var(--font-size-lg) var(--font-mono);">${uptime}</div></div>
+      <div style="text-align:center;"><div class="ops-label">WORKSPACES</div><div style="font:700 var(--font-size-lg) var(--font-mono);">${workspaces.length}</div></div>
+      <div style="text-align:center;"><div class="ops-label">ACTIVE</div><div style="font:700 var(--font-size-lg) var(--font-mono);color:var(--status-active);">${activeWorkspaces}</div></div>
+      <div style="text-align:center;"><div class="ops-label">SESSIONS</div><div style="font:700 var(--font-size-lg) var(--font-mono);">${totalWorkspaceSessions}</div></div>
+      <div style="text-align:center;"><div class="ops-label">DIRTY REPOS</div><div style="font:700 var(--font-size-lg) var(--font-mono);color:${dirtyRepos ? 'var(--brand-amber)' : 'var(--status-active)'};">${dirtyRepos}</div></div>
+      <div style="text-align:center;"><div class="ops-label">TOOLS</div><div style="font:700 var(--font-size-lg) var(--font-mono);">${totalTools}</div></div>
     </div>
   `;
 
-  const integrityPct = totals.total > 0 ? Math.round((totals.completed / totals.total) * 100) : 100;
   document.getElementById('statsStrip').innerHTML = [
-    StatCard({ label: 'INTEGRITY', value: integrityPct + '%', accent: 'var(--status-active)', barWidth: integrityPct + '%', subtext: `${totals.completed} of ${totals.total} responsive` }),
-    StatCard({ label: 'AGENT CALLS', value: totals.total, accent: 'var(--brand-cyan)', barWidth: '100%' }),
-    StatCard({ label: 'MESSAGES', value: sessions.messages || 0, accent: 'var(--agent-orchestrator)', barWidth: '100%' }),
-    StatCard({ label: 'TOKENS IN', value: (sessions.tokens?.input || 0).toLocaleString(), accent: 'var(--brand-gold)', barWidth: '100%' }),
-    StatCard({ label: 'CACHE HITS', value: (sessions.tokens?.cache || 0).toLocaleString(), accent: 'var(--brand-pink)', barWidth: '100%' }),
+    StatCard({ label: 'REPOS FOUND', value: `${reposFound}/${workspaces.length}`, accent: reposFound === workspaces.length ? 'var(--status-active)' : 'var(--brand-amber)', barWidth: Math.round((reposFound / Math.max(workspaces.length, 1))*100)+'%' }),
+    StatCard({ label: 'WORKSPACE SESSIONS', value: totalWorkspaceSessions, accent: 'var(--brand-cyan)', barWidth: '100%' }),
+    StatCard({ label: 'MESSAGES', value: totalMessages.toLocaleString(), accent: 'var(--brand-violet)', barWidth: '100%' }),
+    StatCard({ label: 'CACHE HITS', value: (sessions.tokens?.cache || 0).toLocaleString(), accent: 'var(--brand-gold)', barWidth: '100%' }),
+    StatCard({ label: 'TOP LANE', value: topWorkspace ? (topWorkspace.label || topWorkspace.key).toUpperCase() : '—', accent: 'var(--brand-magenta)', barWidth: topWorkspace ? Math.round(((topWorkspace.sessions || 0) / Math.max(totalWorkspaceSessions, 1))*100)+'%' : '0%', subtext: topWorkspace ? `${topWorkspace.sessions || 0} sessions` : '' }),
   ].join('');
 
   document.getElementById('overviewBottom').innerHTML = `
     <div class="glass-card glow-violet" style="padding:var(--space-4);">
-      <div class="section-eyebrow">THROUGHPUT</div>
-      <div style="font:700 var(--font-size-2xl) var(--font-display);color:var(--brand-cyan);margin:var(--space-2) 0;text-shadow:0 0 30px rgba(125,211,252,0.3);">${totals.total}</div>
-      <div style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);margin-bottom:var(--space-2);">Total responses</div>
-      <canvas id="sparklineCanvas" class="sparkline-canvas" width="400" height="40"></canvas>
+      <div class="section-eyebrow">REPO BOARD</div>
+      <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-2);margin-top:var(--space-3);">${repoGrid}</div>
     </div>
     <div class="glass-card glow-cyan" style="padding:var(--space-4);">
-      <div class="section-eyebrow">ACTIVITY</div>
-      <div style="max-height:200px;overflow-y:auto;">${feedHtml || '<div class="empty-state">No activity yet</div>'}</div>
+      <div class="section-eyebrow">RECENT HERMES SESSIONS</div>
+      <div style="max-height:260px;overflow-y:auto;margin-top:var(--space-2);">${recentSessions || '<div class="empty-state">No recent sessions</div>'}</div>
     </div>
   `;
-
-  requestAnimationFrame(() => {
-    const canvas = document.getElementById('sparklineCanvas');
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    const w = canvas.width, h = canvas.height;
-    ctx.clearRect(0, 0, w, h);
-    if (sparkData.length < 2) return;
-    const max = Math.max(...sparkData, 1);
-    const pts = sparkData.map((v, i) => ({ x: (i / (sparkData.length - 1)) * w, y: h - (v / max) * (h - 8) - 4 }));
-
-    const grad = ctx.createLinearGradient(0, 0, 0, h);
-    grad.addColorStop(0, 'rgba(139,92,246,0.35)');
-    grad.addColorStop(1, 'rgba(125,211,252,0.03)');
-    ctx.beginPath();
-    ctx.moveTo(pts[0].x, h);
-    pts.forEach(p => ctx.lineTo(p.x, p.y));
-    ctx.lineTo(pts[pts.length-1].x, h);
-    ctx.fillStyle = grad;
-    ctx.fill();
-
-    ctx.beginPath();
-    pts.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
-    ctx.strokeStyle = '#8B5CF6';
-    ctx.lineWidth = 2;
-    ctx.shadowColor = '#8B5CF6';
-    ctx.shadowBlur = 12;
-    ctx.stroke();
-    ctx.shadowBlur = 0;
-
-    const last = pts[pts.length - 1];
-    ctx.beginPath();
-    ctx.arc(last.x, last.y, 4, 0, Math.PI * 2);
-    ctx.fillStyle = '#7DD3FC';
-    ctx.shadowColor = '#7DD3FC';
-    ctx.shadowBlur = 16;
-    ctx.fill();
-    ctx.shadowBlur = 0;
-    ctx.beginPath();
-    ctx.arc(last.x, last.y, 8, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(125,211,252,0.2)';
-    ctx.fill();
-  });
 }
 
 // ══════════════════════════════════════════════════════════════
