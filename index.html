@@ -928,6 +928,16 @@ function staggerDelay(index) {
   return `animation-delay: ${index * 80}ms;`;
 }
 
+const CONTENT_COLORS = ['var(--brand-violet)', 'var(--brand-cyan)', 'var(--brand-gold)', 'var(--brand-magenta)', 'var(--brand-teal)', 'var(--status-active)'];
+function hashString(value) {
+  let hash = 0;
+  for (let i = 0; i < value.length; i++) hash = ((hash << 5) - hash) + value.charCodeAt(i);
+  return Math.abs(hash);
+}
+function contentGroupColor(value) {
+  return CONTENT_COLORS[hashString(String(value || 'content')) % CONTENT_COLORS.length];
+}
+
 // ══════════════════════════════════════════════════════════════
 // OVERVIEW TAB
 // ══════════════════════════════════════════════════════════════
@@ -1340,26 +1350,31 @@ async function loadContentDocs() {
     contentDocs = await res.json();
   } catch(e) { contentDocs = []; }
   renderContentSidebar();
+  if (contentDocs.length && !contentDocs.some(d => d.path === selectedDoc?.path)) {
+    await selectDoc(contentDocs[0].path);
+  } else if (!contentDocs.length) {
+    document.getElementById('contentPanel').innerHTML = '<div class="empty-state">No markdown files found in project repos or Hermes content</div>';
+  }
 }
 
 function renderContentSidebar() {
   const grouped = {};
   contentDocs.forEach(d => {
-    if (!grouped[d.agent]) grouped[d.agent] = [];
-    grouped[d.agent].push(d);
+    const key = d.group || 'content';
+    if (!grouped[key]) grouped[key] = [];
+    grouped[key].push(d);
   });
 
-  const agentOrder = ['orchestrator', 'analyst', 'writer', 'marketer', 'coder'];
-  document.getElementById('contentSidebar').innerHTML = agentOrder.map(agent => {
-    const docs = grouped[agent] || [];
-    const cfg = AGENTS[agent] || { color: 'var(--text-muted)' };
-    if (docs.length === 0) return '';
+  const groups = Object.keys(grouped).sort((a, b) => a.localeCompare(b));
+  document.getElementById('contentSidebar').innerHTML = groups.map(group => {
+    const docs = grouped[group] || [];
+    const color = contentGroupColor(group);
     return `<div class="content-agent-group">
-      <div class="content-agent-name" style="color:${cfg.color};">${agent}</div>
+      <div class="content-agent-name" style="color:${color};">${group}</div>
       ${docs.map(d => `
-        <div class="content-doc-item ${selectedDoc?.filename === d.filename && selectedDoc?.agent === d.agent ? 'selected' : ''}"
-             style="--agent-color:${cfg.color};"
-             onclick="selectDoc('${d.agent}','${d.filename}')">
+        <div class="content-doc-item ${selectedDoc?.path === d.path ? 'selected' : ''}"
+             style="--agent-color:${color};"
+             onclick="selectDoc(${JSON.stringify(d.path)})">
           <div class="content-doc-title">${d.title}</div>
           <div class="content-doc-filename">${d.filename}</div>
         </div>
@@ -1368,44 +1383,50 @@ function renderContentSidebar() {
   }).join('') || '<div class="empty-state">No documents yet</div>';
 }
 
-window.selectDoc = async function(agent, filename) {
-  selectedDoc = { agent, filename };
+window.selectDoc = async function(path) {
+  selectedDoc = contentDocs.find(d => d.path === path) || { path };
   renderContentSidebar();
   try {
-    const res = await fetch('api/content/get?path=' + encodeURIComponent(filename));
+    const res = await fetch('api/content/get?path=' + encodeURIComponent(path));
     const data = await res.json();
-    const cfg = AGENTS[agent] || { color: 'var(--text-muted)' };
-    const doc = contentDocs.find(d => d.filename === filename && d.agent === agent);
+    const doc = contentDocs.find(d => d.path === path);
+    const editable = !!doc?.editable && !!data.editable;
+    const color = contentGroupColor(doc?.group || 'content');
     document.getElementById('contentPanel').innerHTML = `
       <div class="content-preview-header dissolve-in">
         <div>
-          <div class="content-preview-title">${doc?.title || filename}</div>
-          <div style="display:flex;gap:var(--space-2);align-items:center;margin-top:4px;">
-            ${Badge({ text: agent.toUpperCase(), color: cfg.color, variant: 'solid' })}
+          <div class="content-preview-title">${doc?.title || path}</div>
+          <div style="display:flex;gap:var(--space-2);align-items:center;margin-top:4px;flex-wrap:wrap;">
+            ${Badge({ text: (doc?.group || 'CONTENT').toUpperCase(), color, variant: 'solid' })}
             <span style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);">${doc?.modified_at ? relativeTime(doc.modified_at) : ''}</span>
+            ${editable ? '' : '<span style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);opacity:0.7;">read only</span>'}
           </div>
         </div>
         <div style="display:flex;gap:var(--space-2);">
           <button class="btn-secondary" id="viewBtn" onclick="showViewMode()">View</button>
-          <button class="btn-secondary" id="editBtn" onclick="showEditMode()">Edit</button>
+          ${editable ? '<button class="btn-secondary" id="editBtn" onclick="showEditMode()">Edit</button>' : ''}
         </div>
       </div>
       <div id="contentBody" class="content-preview-body dissolve-in" style="animation-delay:100ms;">${marked.parse(data.content || '')}</div>
       <div id="editArea" style="display:none;"></div>
     `;
     window._currentContent = data.content || '';
-    window._currentPath = filename;
+    window._currentPath = path;
+    window._currentEditable = editable;
   } catch(e) {
     document.getElementById('contentPanel').innerHTML = '<div class="empty-state">Failed to load document</div>';
   }
 };
 
 window.showViewMode = function() {
-  document.getElementById('contentBody').style.display = 'block';
-  document.getElementById('editArea').style.display = 'none';
+  const body = document.getElementById('contentBody');
+  const edit = document.getElementById('editArea');
+  if (body) body.style.display = 'block';
+  if (edit) edit.style.display = 'none';
 };
 
 window.showEditMode = function() {
+  if (!window._currentEditable) return;
   document.getElementById('contentBody').style.display = 'none';
   document.getElementById('editArea').style.display = 'block';
   document.getElementById('editArea').innerHTML = `
@@ -1418,6 +1439,7 @@ window.showEditMode = function() {
 };
 
 window.saveContent = async function() {
+  if (!window._currentEditable) return;
   const content = document.getElementById('editTextarea').value;
   await fetch('api/content/save', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ path: window._currentPath, content }) });
   window._currentContent = content;

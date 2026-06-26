@@ -17,6 +17,10 @@ from urllib.parse import urlparse, parse_qs
 
 HERMES_HOME = os.environ.get("HERMES_HOME", os.path.expanduser("~/.hermes"))
 CONTENT_DIR = os.path.join(HERMES_HOME, "content")
+PROJECT_DOC_SKIP_DIRS = {
+    ".git", ".github", ".venv", "__pycache__", "node_modules", "dist",
+    "build", "target", "graphify-out", "coverage", "backups",
+}
 DB_LOG = os.path.join(HERMES_HOME, "agent-logs.db")
 DB_STATE = os.path.join(HERMES_HOME, "state.db")
 DB_KANBAN = os.path.join(HERMES_HOME, "kanban.db")
@@ -368,6 +372,95 @@ def _repo_info(repo):
     return info
 
 
+def _markdown_title(fpath):
+    try:
+        with open(fpath, encoding="utf-8", errors="replace") as f:
+            for _ in range(16):
+                line = f.readline()
+                if not line:
+                    break
+                line = line.strip()
+                if line.startswith("#"):
+                    title = line.lstrip("#").strip()
+                    if title:
+                        return title
+    except Exception:
+        pass
+    name = os.path.splitext(os.path.basename(fpath))[0]
+    return "README" if name.lower() == "readme" else name
+
+
+def _markdown_docs_in_root(root, group, group_key, prefix, editable):
+    docs = []
+    root = os.path.abspath(root)
+    if not os.path.isdir(root):
+        return docs
+
+    for current_root, dirs, files in os.walk(root):
+        rel_root = os.path.relpath(current_root, root)
+        depth = 0 if rel_root == "." else rel_root.count(os.sep) + 1
+        dirs[:] = [d for d in dirs if d not in PROJECT_DOC_SKIP_DIRS and not d.startswith(".")]
+        if depth >= 4:
+            dirs[:] = []
+
+        for fname in files:
+            if not fname.lower().endswith(".md"):
+                continue
+            fpath = os.path.join(current_root, fname)
+            rel_path = os.path.relpath(fpath, root)
+            try:
+                stat = os.stat(fpath)
+            except Exception:
+                continue
+            docs.append({
+                "group": group,
+                "group_key": group_key,
+                "path": f"{prefix}/{rel_path}".replace("\\", "/"),
+                "filename": rel_path.replace("\\", "/"),
+                "title": _markdown_title(fpath),
+                "modified_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+                "size": stat.st_size,
+                "editable": editable,
+            })
+    return docs
+
+
+def _content_docs():
+    docs = []
+    if os.path.isdir(CONTENT_DIR):
+        for agent_dir in sorted(os.listdir(CONTENT_DIR)):
+            agent_path = os.path.join(CONTENT_DIR, agent_dir)
+            if not os.path.isdir(agent_path):
+                continue
+            docs.extend(_markdown_docs_in_root(
+                agent_path,
+                group=agent_dir,
+                group_key=agent_dir,
+                prefix=f"content/{agent_dir}",
+                editable=True,
+            ))
+
+    config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "workspaces.json")
+    try:
+        with open(config_path) as f:
+            config = json.load(f)
+    except Exception:
+        config = {"workspaces": []}
+
+    for ws in config.get("workspaces", []):
+        repo = ws.get("repo", "")
+        docs.extend(_markdown_docs_in_root(
+            repo,
+            group=ws.get("name") or ws.get("label") or ws.get("key") or "workspace",
+            group_key=ws.get("key") or ws.get("name") or ws.get("label") or "workspace",
+            prefix=f"workspace/{ws.get('key') or ws.get('name') or 'workspace'}",
+            editable=False,
+        ))
+
+    docs.sort(key=lambda d: ((d.get("group") or "").lower(), (d.get("title") or "").lower(), d.get("path") or ""))
+    return docs
+
+
 def _session_matches_workspace(row, terms):
     text = " ".join(str(row.get(k) or "") for k in ("title", "id", "source", "model")).lower()
     return any(term.lower() in text for term in terms)
@@ -512,51 +605,66 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self.send_json([dict(r) for r in rows])
 
         elif path == "/api/content":
-            docs = []
-            if os.path.isdir(CONTENT_DIR):
-                for agent_dir in os.listdir(CONTENT_DIR):
-                    agent_path = os.path.join(CONTENT_DIR, agent_dir)
-                    if os.path.isdir(agent_path):
-                        for fname in os.listdir(agent_path):
-                            if fname.endswith(".md"):
-                                fpath = os.path.join(agent_path, fname)
-                                try:
-                                    with open(fpath) as f:
-                                        first_line = f.readline().strip()
-                                    title = first_line.lstrip("# ").strip() if first_line.startswith("#") else fname
-                                    stat = os.stat(fpath)
-                                    docs.append({
-                                        "agent": agent_dir,
-                                        "filename": fname,
-                                        "title": title,
-                                        "modified_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
-                                        "size": stat.st_size,
-                                    })
-                                except Exception:
-                                    pass
-            self.send_json(docs)
+            self.send_json(_content_docs())
 
         elif path == "/api/content/get":
-            filename = params.get("path", [""])[0]
-            if not filename:
+            requested = params.get("path", [""])[0]
+            if not requested:
                 self.send_json({"error": "Missing path parameter"}, 400)
                 return
-            # Validate: no traversal
-            if ".." in filename or "/" in filename:
-                self.send_json({"error": "Invalid path"}, 403)
+            requested = requested.replace("\\", "/")
+
+            def _safe_read(base_dir, rel_path):
+                base_dir = os.path.abspath(base_dir)
+                candidate = os.path.abspath(os.path.normpath(os.path.join(base_dir, rel_path)))
+                if candidate != base_dir and not candidate.startswith(base_dir + os.sep):
+                    return None
+                if not os.path.isfile(candidate):
+                    return None
+                with open(candidate, encoding="utf-8", errors="replace") as f:
+                    return f.read()
+
+            if requested.startswith("content/"):
+                rel = requested[len("content/"):]
+                agent_dir, _, rel_path = rel.partition("/")
+                if not agent_dir or not rel_path:
+                    self.send_json({"error": "Invalid path"}, 403)
+                    return
+                content = _safe_read(os.path.join(CONTENT_DIR, agent_dir), rel_path)
+                if content is None:
+                    self.send_json({"error": "File not found"}, 404)
+                    return
+                self.send_json({"content": content, "path": requested, "editable": True})
                 return
-            # Search all agent dirs
-            found = False
-            for agent_dir in os.listdir(CONTENT_DIR) if os.path.isdir(CONTENT_DIR) else []:
-                fpath = os.path.join(CONTENT_DIR, agent_dir, filename)
-                if os.path.isfile(fpath):
-                    with open(fpath) as f:
-                        content = f.read()
-                    self.send_json({"content": content, "agent": agent_dir, "filename": filename})
-                    found = True
-                    break
-            if not found:
-                self.send_json({"error": "File not found"}, 404)
+
+            if requested.startswith("workspace/"):
+                rel = requested[len("workspace/"):]
+                ws_key, _, rel_path = rel.partition("/")
+                if not ws_key or not rel_path:
+                    self.send_json({"error": "Invalid path"}, 403)
+                    return
+                config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "workspaces.json")
+                try:
+                    with open(config_path) as f:
+                        config = json.load(f)
+                except Exception:
+                    config = {"workspaces": []}
+                repo = None
+                for ws in config.get("workspaces", []):
+                    if ws.get("key") == ws_key:
+                        repo = ws.get("repo", "")
+                        break
+                if not repo:
+                    self.send_json({"error": "File not found"}, 404)
+                    return
+                content = _safe_read(repo, rel_path)
+                if content is None:
+                    self.send_json({"error": "File not found"}, 404)
+                    return
+                self.send_json({"content": content, "path": requested, "editable": False})
+                return
+
+            self.send_json({"error": "File not found"}, 404)
 
         else:
             self.send_error(404)
@@ -617,27 +725,26 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self.send_json({"ok": True})
 
         elif path == "/api/content/save":
-            filename = body.get("path", "")
+            requested = body.get("path", "")
             content = body.get("content", "")
-            if not filename or ".." in filename or "/" in filename:
+            if not requested or not requested.startswith("content/"):
+                self.send_json({"error": "Read-only document"}, 403)
+                return
+            requested = requested.replace("\\", "/")
+            rel = requested[len("content/"):]
+            agent_dir, _, rel_path = rel.partition("/")
+            if not agent_dir or not rel_path:
                 self.send_json({"error": "Invalid path"}, 403)
                 return
-            # Save to first agent dir found, or create new
-            saved = False
-            if os.path.isdir(CONTENT_DIR):
-                for agent_dir in os.listdir(CONTENT_DIR):
-                    fpath = os.path.join(CONTENT_DIR, agent_dir, filename)
-                    if os.path.isfile(fpath):
-                        with open(fpath, "w") as f:
-                            f.write(content)
-                        saved = True
-                        break
-            if not saved:
-                # Default to writer
-                fpath = os.path.join(CONTENT_DIR, "writer", filename)
-                os.makedirs(os.path.dirname(fpath), exist_ok=True)
-                with open(fpath, "w") as f:
-                    f.write(content)
+            base_dir = os.path.abspath(os.path.join(CONTENT_DIR, agent_dir))
+            os.makedirs(base_dir, exist_ok=True)
+            candidate = os.path.abspath(os.path.normpath(os.path.join(base_dir, rel_path)))
+            if candidate != base_dir and not candidate.startswith(base_dir + os.sep):
+                self.send_json({"error": "Invalid path"}, 403)
+                return
+            os.makedirs(os.path.dirname(candidate), exist_ok=True)
+            with open(candidate, "w", encoding="utf-8") as f:
+                f.write(content)
             self.send_json({"ok": True})
 
         else:
