@@ -1646,6 +1646,7 @@ let overviewTimeFrame = 7;
 
 function setOverviewTimeFrame(days) {
   overviewTimeFrame = days;
+  lastOverviewSignature = null;
   document.querySelectorAll('.tf-btn').forEach(b => {
     b.classList.toggle('active', parseInt(b.dataset.tf) === days);
   });
@@ -1742,7 +1743,7 @@ function renderScheduleIfChanged(d, force = false) {
 
 async function fetchSnapshot() {
   try {
-    const tf = overviewTimeFrame ? `?tf=${overviewTimeFrame}` : '';
+    const tf = overviewTimeFrame > 0 ? `?tf=${overviewTimeFrame}` : '';
     const res = await fetch('api/snapshot' + tf);
     lastSnapshot = await res.json();
     if (currentTab === 'overview') renderOverviewIfChanged(lastSnapshot);
