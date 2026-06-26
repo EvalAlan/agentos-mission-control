@@ -1153,7 +1153,7 @@ function renderOverview(d) {
     StatCard({ label: 'REPOS FOUND', value: `${reposFound}/${workspaces.length}`, accent: reposFound === workspaces.length ? 'var(--status-active)' : 'var(--brand-amber)', barWidth: Math.round((reposFound / Math.max(workspaces.length, 1))*100)+'%' }),
     StatCard({ label: 'WORKSPACE SESSIONS', value: totalWorkspaceSessions, accent: 'var(--brand-cyan)', barWidth: '100%' }),
     StatCard({ label: 'MESSAGES', value: totalMessages.toLocaleString(), accent: 'var(--brand-violet)', barWidth: '100%' }),
-    StatCard({ label: 'CACHE HITS', value: (sessions.tokens?.cache || 0).toLocaleString(), accent: 'var(--brand-gold)', barWidth: '100%' }),
+    StatCard({ label: 'TOTAL TOKENS', value: ((sessions.tokens?.input || 0) + (sessions.tokens?.output || 0)).toLocaleString(), accent: 'var(--brand-gold)', barWidth: '100%' }),
     StatCard({ label: 'TOP LANE', value: topWorkspace ? (topWorkspace.label || topWorkspace.key).toUpperCase() : '—', accent: 'var(--brand-magenta)', barWidth: topWorkspace ? Math.round(((topWorkspace.sessions || 0) / Math.max(totalWorkspaceSessions, 1))*100)+'%' : '0%', subtext: topWorkspace ? `${topWorkspace.sessions || 0} sessions` : '' }),
   ].join('');
 
