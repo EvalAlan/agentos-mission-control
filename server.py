@@ -140,6 +140,17 @@ def sessions_data():
         if "sessions" in tables:
             count = conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
             cols = {r[1] for r in conn.execute("PRAGMA table_info(sessions)").fetchall()}
+            has_input = "input_tokens" in cols
+            has_output = "output_tokens" in cols
+            if has_input or has_output:
+                row = conn.execute(
+                    f"SELECT SUM({('input_tokens' if has_input else '0')}), SUM({('output_tokens' if has_output else '0')}) FROM sessions"
+                ).fetchone()
+                tokens = {
+                    "input": row[0] or 0 if has_input else 0,
+                    "output": row[1] or 0 if has_output else 0,
+                    "cache": 0,
+                }
             wanted = [
                 "id", "source", "model", "started_at", "ended_at", "end_reason",
                 "message_count", "tool_call_count", "input_tokens", "output_tokens",
