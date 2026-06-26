@@ -259,25 +259,23 @@
     .content-sidebar {
       display: flex;
       flex-direction: column;
-      gap: 6px;
-      position: sticky;
-      top: 72px;
-      align-self: start;
-      max-height: calc(100vh - 96px);
-      overflow-y: auto;
+      gap: 8px;
     }
+
     .content-agent-group {
       background: rgba(255,255,255,0.02);
       border: 1px solid rgba(255,255,255,0.06);
       border-radius: 8px;
       overflow: hidden;
+      padding: 0;
     }
+
     .content-group-toggle {
       width: 100%;
       display: flex;
-      align-items: flex-start;
-      gap: var(--space-3);
-      padding: 16px 16px 14px;
+      align-items: center;
+      gap: var(--space-2);
+      padding: 14px 16px;
       cursor: pointer;
       border: none;
       background: none;
@@ -288,19 +286,20 @@
     }
     .content-group-toggle:hover { background: rgba(255,255,255,0.04); }
     .content-group-toggle:focus { outline: none; box-shadow: inset 0 0 0 1px rgba(139,92,246,0.35); }
-    .content-group-toggle .content-group-chevron {
+    .content-group-chevron {
       flex-shrink: 0;
-      font: 400 14px var(--font-mono);
+      width: 20px;
+      font: 400 16px var(--font-mono);
       color: var(--text-muted);
       transition: transform 0.2s ease;
-      margin-top: 2px;
+      text-align: center;
     }
     .content-group-open .content-group-chevron { transform: rotate(90deg); }
-    .content-group-toggle .content-group-meta {
+    .content-group-meta {
       display: flex;
       flex-direction: column;
       align-items: flex-start;
-      gap: 4px;
+      gap: 3px;
       min-width: 0;
       flex: 1;
     }
@@ -311,22 +310,22 @@
       width: 100%;
     }
     .content-agent-name {
-      font: 600 16px var(--font-display);
+      font: 600 15px var(--font-display);
       letter-spacing: 0.01em;
       text-transform: none;
       line-height: 1.3;
     }
     .content-group-summary {
-      font: 500 12px var(--font-mono);
+      font: 500 11px var(--font-mono);
       color: var(--text-muted);
       letter-spacing: 0.05em;
       text-transform: uppercase;
       opacity: 0.7;
     }
     .content-group-preview {
-      font: 400 13px var(--font-display);
+      font: 400 12px var(--font-display);
       color: var(--text-muted);
-      line-height: 1.45;
+      line-height: 1.4;
       opacity: 0.8;
       display: -webkit-box;
       -webkit-line-clamp: 2;
@@ -340,12 +339,6 @@
       border-top: 1px solid rgba(255,255,255,0.04);
     }
     .content-group-open .content-group-docs { display: flex; flex-direction: column; }
-    .content-agent-name {
-      font: 600 16px var(--font-display);
-      letter-spacing: 0.01em;
-      text-transform: none;
-      line-height: 1.3;
-    }
     .content-doc-item {
       padding: var(--space-2) var(--space-3); border-radius: var(--radius-md);
       cursor: pointer; border-left: 2px solid transparent;
@@ -744,7 +737,7 @@
     <div class="section-eyebrow">DOCUMENT LIBRARY</div>
     <div class="section-heading">Content</div>
     <div class="content-layout">
-      <div class="glass-card content-sidebar" style="padding:var(--space-3);" id="contentSidebar">
+      <div class="content-sidebar" id="contentSidebar">
         <div class="empty-state">Loading documents...</div>
       </div>
       <div class="glass-card" style="padding:var(--space-4);" id="contentPanel">
