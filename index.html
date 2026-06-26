@@ -882,7 +882,7 @@ function switchTab(name) {
   if (name === 'overview') renderOverviewIfChanged(lastSnapshot, true);
   if (name === 'agents') renderWorkspacesIfChanged(lastSnapshot, true);
   if (name === 'tasks') loadTasks();
-  if (name === 'schedule') renderSchedule(lastSnapshot);
+  if (name === 'schedule') renderScheduleIfChanged(lastSnapshot, true);
   if (name === 'content') loadContentDocs();
 }
 document.querySelectorAll('.nav-tab').forEach(tab => {
@@ -1431,6 +1431,7 @@ window.saveContent = async function() {
 let lastSnapshot = null;
 let lastOverviewSignature = null;
 let lastWorkspacesSignature = null;
+let lastScheduleSignature = null;
 
 function overviewSignature(d) {
   if (!d) return '';
@@ -1488,13 +1489,37 @@ function renderWorkspacesIfChanged(d, force = false) {
   }
 }
 
+function scheduleSignature(d) {
+  if (!d) return '';
+  const crons = (d.crons || []).map(c => ({
+    job_id: c.job_id || '',
+    owner: c.owner || '',
+    command: c.command || '',
+    schedule: c.schedule || '',
+    description: c.description || '',
+    source: c.source || '',
+    enabled: c.enabled !== false,
+    state: c.state || '',
+    next_run_at: c.next_run_at || '',
+  }));
+  return JSON.stringify({ crons });
+}
+
+function renderScheduleIfChanged(d, force = false) {
+  const sig = scheduleSignature(d);
+  if (force || sig !== lastScheduleSignature) {
+    lastScheduleSignature = sig;
+    renderSchedule(d);
+  }
+}
+
 async function fetchSnapshot() {
   try {
     const res = await fetch('api/snapshot');
     lastSnapshot = await res.json();
     if (currentTab === 'overview') renderOverviewIfChanged(lastSnapshot);
     if (currentTab === 'agents') renderWorkspacesIfChanged(lastSnapshot);
-    if (currentTab === 'schedule') renderSchedule(lastSnapshot);
+    if (currentTab === 'schedule') renderScheduleIfChanged(lastSnapshot);
   } catch(e) {}
 }
 
@@ -1506,7 +1531,7 @@ function startSSE() {
         lastSnapshot = JSON.parse(e.data);
         if (currentTab === 'overview') renderOverviewIfChanged(lastSnapshot);
         if (currentTab === 'agents') renderWorkspacesIfChanged(lastSnapshot);
-        if (currentTab === 'schedule') renderSchedule(lastSnapshot);
+        if (currentTab === 'schedule') renderScheduleIfChanged(lastSnapshot);
       } catch(ex) {}
     };
     evtSource.onerror = () => {
