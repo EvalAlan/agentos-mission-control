@@ -266,10 +266,11 @@
     .content-group-toggle {
       width: 100%;
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       justify-content: space-between;
       gap: var(--space-2);
-      padding: var(--space-2) var(--space-3);
+      padding: var(--space-3) var(--space-3);
+      min-height: 58px;
       cursor: pointer;
       border: none;
       background: rgba(255,255,255,0.02);
@@ -281,7 +282,18 @@
     .content-group-toggle:hover { background: rgba(255,255,255,0.05); }
     .content-group-toggle:focus { outline: none; box-shadow: inset 0 0 0 1px rgba(139,92,246,0.35); }
     .content-group-toggle .content-group-meta {
-      display: flex; align-items: center; gap: var(--space-2); min-width: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 4px;
+      min-width: 0;
+    }
+    .content-group-summary {
+      font: 400 var(--font-size-xs) var(--font-mono);
+      color: var(--text-muted);
+      letter-spacing: 0;
+      text-transform: none;
+      opacity: 0.9;
     }
     .content-group-toggle .content-group-chevron {
       font: 500 var(--font-size-xs) var(--font-mono);
@@ -296,9 +308,11 @@
     }
     .content-group-open .content-group-docs { display: flex; flex-direction: column; }
     .content-agent-name {
-      font: 500 var(--font-size-xs) var(--font-mono);
-      letter-spacing: var(--letter-spacing-wide); text-transform: uppercase;
+      font: 600 14px var(--font-display);
+      letter-spacing: 0.01em;
+      text-transform: none;
       margin-bottom: var(--space-2);
+      line-height: 1.15;
     }
     .content-doc-item {
       padding: var(--space-2) var(--space-3); border-radius: var(--radius-md);
@@ -1477,7 +1491,7 @@ function renderContentSidebar() {
       <button class="content-group-toggle" type="button" data-content-toggle="${group}">
         <span class="content-group-meta">
           <span class="content-agent-name" style="color:${color};margin-bottom:0;">${group}</span>
-          ${Badge({ text: String(docs.length), color, variant: 'subtle' })}
+          <span class="content-group-summary">${docs.length} document${docs.length === 1 ? '' : 's'}${selectedDoc && contentGroupKey(selectedDoc) === group ? ' · open' : ''}</span>
         </span>
         <span class="content-group-chevron">›</span>
       </button>
