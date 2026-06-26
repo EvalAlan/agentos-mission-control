@@ -257,6 +257,44 @@
 
     .content-layout { display: grid; grid-template-columns: 280px 1fr; gap: var(--space-4); min-height: 60vh; }
     .content-sidebar { display: flex; flex-direction: column; gap: var(--space-3); overflow-y: auto; max-height: 70vh; }
+    .content-agent-group {
+      background: rgba(255,255,255,0.02);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+    }
+    .content-group-toggle {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--space-2);
+      padding: var(--space-2) var(--space-3);
+      cursor: pointer;
+      border: none;
+      background: rgba(255,255,255,0.02);
+      color: inherit;
+      font: inherit;
+      text-align: left;
+      transition: background 0.2s ease, border-color 0.2s ease;
+    }
+    .content-group-toggle:hover { background: rgba(255,255,255,0.05); }
+    .content-group-toggle:focus { outline: none; box-shadow: inset 0 0 0 1px rgba(139,92,246,0.35); }
+    .content-group-toggle .content-group-meta {
+      display: flex; align-items: center; gap: var(--space-2); min-width: 0;
+    }
+    .content-group-toggle .content-group-chevron {
+      font: 500 var(--font-size-xs) var(--font-mono);
+      color: var(--text-muted);
+      transition: transform 0.2s ease;
+    }
+    .content-group-open .content-group-chevron { transform: rotate(90deg); }
+    .content-group-docs {
+      display: none;
+      padding: var(--space-2);
+      gap: var(--space-1);
+    }
+    .content-group-open .content-group-docs { display: flex; flex-direction: column; }
     .content-agent-name {
       font: 500 var(--font-size-xs) var(--font-mono);
       letter-spacing: var(--letter-spacing-wide); text-transform: uppercase;
@@ -272,6 +310,16 @@
       background: rgba(255,255,255,0.06);
       border-left-color: var(--agent-color, var(--brand-cyan));
       box-shadow: inset 0 0 20px rgba(139,92,246,0.05);
+    }
+    .content-doc-item button {
+      width: 100%;
+      text-align: left;
+      border: none;
+      background: none;
+      color: inherit;
+      padding: 0;
+      cursor: pointer;
+      font: inherit;
     }
     .content-doc-title { font: 500 13px var(--font-display); color: var(--text-primary); }
     .content-doc-filename { font: 400 var(--font-size-xs) var(--font-mono); color: var(--text-muted); }
@@ -1343,48 +1391,114 @@ function renderSchedule(d) {
 // ══════════════════════════════════════════════════════════════
 let contentDocs = [];
 let selectedDoc = null;
+let contentExpandedGroups = new Set();
+let contentSidebarInitialized = false;
+
+function contentGroupKey(doc) {
+  return doc?.group || 'content';
+}
+
+function setOnlyContentGroupOpen(group) {
+  contentExpandedGroups = new Set(group ? [group] : []);
+}
+
+function ensureSelectedGroupOpen() {
+  const group = contentGroupKey(selectedDoc);
+  if (group) contentExpandedGroups.add(group);
+}
+
+function installContentSidebarHandlers() {
+  const sidebar = document.getElementById('contentSidebar');
+  if (!sidebar || sidebar.dataset.bound === '1') return;
+  sidebar.dataset.bound = '1';
+  sidebar.addEventListener('click', (event) => {
+    const toggle = event.target.closest('[data-content-toggle]');
+    if (toggle) {
+      const group = toggle.dataset.contentToggle;
+      contentSidebarInitialized = true;
+      if (contentExpandedGroups.has(group)) contentExpandedGroups.delete(group);
+      else contentExpandedGroups.add(group);
+      renderContentSidebar();
+      return;
+    }
+    const docBtn = event.target.closest('[data-content-path]');
+    if (docBtn) {
+      event.preventDefault();
+      const path = docBtn.dataset.contentPath;
+      if (path) selectDoc(path);
+    }
+  });
+}
 
 async function loadContentDocs() {
   try {
     const res = await fetch('api/content');
     contentDocs = await res.json();
   } catch(e) { contentDocs = []; }
-  renderContentSidebar();
-  if (contentDocs.length && !contentDocs.some(d => d.path === selectedDoc?.path)) {
-    await selectDoc(contentDocs[0].path);
-  } else if (!contentDocs.length) {
+  installContentSidebarHandlers();
+
+  if (!contentDocs.length) {
+    selectedDoc = null;
+    contentExpandedGroups = new Set();
+    contentSidebarInitialized = false;
+    renderContentSidebar();
     document.getElementById('contentPanel').innerHTML = '<div class="empty-state">No markdown files found in project repos or Hermes content</div>';
+    return;
   }
+
+  if (!contentDocs.some(d => d.path === selectedDoc?.path)) {
+    await selectDoc(contentDocs[0].path);
+    return;
+  }
+
+  renderContentSidebar();
 }
 
 function renderContentSidebar() {
   const grouped = {};
   contentDocs.forEach(d => {
-    const key = d.group || 'content';
+    const key = contentGroupKey(d);
     if (!grouped[key]) grouped[key] = [];
     grouped[key].push(d);
   });
 
   const groups = Object.keys(grouped).sort((a, b) => a.localeCompare(b));
+  if (!contentSidebarInitialized && !contentExpandedGroups.size && groups.length) {
+    const selectedGroup = contentGroupKey(selectedDoc);
+    setOnlyContentGroupOpen(selectedGroup && grouped[selectedGroup] ? selectedGroup : groups[0]);
+  }
+  ensureSelectedGroupOpen();
+
   document.getElementById('contentSidebar').innerHTML = groups.map(group => {
     const docs = grouped[group] || [];
     const color = contentGroupColor(group);
-    return `<div class="content-agent-group">
-      <div class="content-agent-name" style="color:${color};">${group}</div>
-      ${docs.map(d => `
-        <div class="content-doc-item ${selectedDoc?.path === d.path ? 'selected' : ''}"
-             style="--agent-color:${color};"
-             onclick="selectDoc(${JSON.stringify(d.path)})">
-          <div class="content-doc-title">${d.title}</div>
-          <div class="content-doc-filename">${d.filename}</div>
-        </div>
-      `).join('')}
+    const isOpen = contentExpandedGroups.has(group);
+    return `<div class="content-agent-group ${isOpen ? 'content-group-open' : ''}">
+      <button class="content-group-toggle" type="button" data-content-toggle="${group}">
+        <span class="content-group-meta">
+          <span class="content-agent-name" style="color:${color};margin-bottom:0;">${group}</span>
+          ${Badge({ text: String(docs.length), color, variant: 'subtle' })}
+        </span>
+        <span class="content-group-chevron">›</span>
+      </button>
+      <div class="content-group-docs">
+        ${docs.map(d => `
+          <div class="content-doc-item ${selectedDoc?.path === d.path ? 'selected' : ''}" style="--agent-color:${color};">
+            <button type="button" data-content-path="${d.path}">
+              <div class="content-doc-title">${d.title}</div>
+              <div class="content-doc-filename">${d.filename}</div>
+            </button>
+          </div>
+        `).join('')}
+      </div>
     </div>`;
   }).join('') || '<div class="empty-state">No documents yet</div>';
 }
 
 window.selectDoc = async function(path) {
   selectedDoc = contentDocs.find(d => d.path === path) || { path };
+  setOnlyContentGroupOpen(contentGroupKey(selectedDoc));
+  contentSidebarInitialized = true;
   renderContentSidebar();
   try {
     const res = await fetch('api/content/get?path=' + encodeURIComponent(path));
