@@ -880,7 +880,7 @@ function switchTab(name) {
   document.querySelector(`[data-tab="${name}"]`).classList.add('active');
 
   if (name === 'overview') renderOverviewIfChanged(lastSnapshot, true);
-  if (name === 'agents') renderAgents(lastSnapshot);
+  if (name === 'agents') renderWorkspacesIfChanged(lastSnapshot, true);
   if (name === 'tasks') loadTasks();
   if (name === 'schedule') renderSchedule(lastSnapshot);
   if (name === 'content') loadContentDocs();
@@ -1430,6 +1430,7 @@ window.saveContent = async function() {
 // ══════════════════════════════════════════════════════════════
 let lastSnapshot = null;
 let lastOverviewSignature = null;
+let lastWorkspacesSignature = null;
 
 function overviewSignature(d) {
   if (!d) return '';
@@ -1455,12 +1456,44 @@ function renderOverviewIfChanged(d, force = false) {
   }
 }
 
+function workspacesSignature(d) {
+  if (!d) return '';
+  const workspaces = (d.workspaces || []).map(w => ({
+    key: w.key,
+    label: w.label,
+    name: w.name,
+    discord: w.discord,
+    description: w.description,
+    sessions: w.sessions || 0,
+    messages: w.messages || 0,
+    tools: w.tools || 0,
+    last_activity: w.last_activity || 0,
+    latest_title: w.latest_session?.title || '',
+    repo: {
+      exists: !!w.repo_info?.exists,
+      dirty: !!w.repo_info?.dirty,
+      branch: w.repo_info?.branch || '',
+      language: w.repo_info?.language || '',
+      last_commit: w.repo_info?.last_commit || '',
+    },
+  }));
+  return JSON.stringify({ workspaces });
+}
+
+function renderWorkspacesIfChanged(d, force = false) {
+  const sig = workspacesSignature(d);
+  if (force || sig !== lastWorkspacesSignature) {
+    lastWorkspacesSignature = sig;
+    renderAgents(d);
+  }
+}
+
 async function fetchSnapshot() {
   try {
     const res = await fetch('api/snapshot');
     lastSnapshot = await res.json();
     if (currentTab === 'overview') renderOverviewIfChanged(lastSnapshot);
-    if (currentTab === 'agents') renderAgents(lastSnapshot);
+    if (currentTab === 'agents') renderWorkspacesIfChanged(lastSnapshot);
     if (currentTab === 'schedule') renderSchedule(lastSnapshot);
   } catch(e) {}
 }
@@ -1472,7 +1505,7 @@ function startSSE() {
       try {
         lastSnapshot = JSON.parse(e.data);
         if (currentTab === 'overview') renderOverviewIfChanged(lastSnapshot);
-        if (currentTab === 'agents') renderAgents(lastSnapshot);
+        if (currentTab === 'agents') renderWorkspacesIfChanged(lastSnapshot);
         if (currentTab === 'schedule') renderSchedule(lastSnapshot);
       } catch(ex) {}
     };
