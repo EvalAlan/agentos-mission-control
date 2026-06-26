@@ -879,7 +879,7 @@ function switchTab(name) {
   document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
   document.querySelector(`[data-tab="${name}"]`).classList.add('active');
 
-  if (name === 'overview') renderOverview(lastSnapshot);
+  if (name === 'overview') renderOverviewIfChanged(lastSnapshot, true);
   if (name === 'agents') renderAgents(lastSnapshot);
   if (name === 'tasks') loadTasks();
   if (name === 'schedule') renderSchedule(lastSnapshot);
@@ -1429,12 +1429,37 @@ window.saveContent = async function() {
 // SSE / POLLING
 // ══════════════════════════════════════════════════════════════
 let lastSnapshot = null;
+let lastOverviewSignature = null;
+
+function overviewSignature(d) {
+  if (!d) return '';
+  const workspaces = (d.workspaces || []).map(w => ({
+    key: w.key,
+    sessions: w.sessions || 0,
+    messages: w.messages || 0,
+    tools: w.tools || 0,
+    last_activity: w.last_activity || 0,
+    branch: w.repo_info?.branch || '',
+    dirty: !!w.repo_info?.dirty,
+    exists: !!w.repo_info?.exists,
+  }));
+  const recent = (d.sessions?.recent || []).slice(0, 8).map(s => [s.id, s.title, s.started_at]);
+  return JSON.stringify({ workspaces, recent });
+}
+
+function renderOverviewIfChanged(d, force = false) {
+  const sig = overviewSignature(d);
+  if (force || sig !== lastOverviewSignature) {
+    lastOverviewSignature = sig;
+    renderOverview(d);
+  }
+}
 
 async function fetchSnapshot() {
   try {
     const res = await fetch('api/snapshot');
     lastSnapshot = await res.json();
-    if (currentTab === 'overview') renderOverview(lastSnapshot);
+    if (currentTab === 'overview') renderOverviewIfChanged(lastSnapshot);
     if (currentTab === 'agents') renderAgents(lastSnapshot);
     if (currentTab === 'schedule') renderSchedule(lastSnapshot);
   } catch(e) {}
@@ -1446,7 +1471,7 @@ function startSSE() {
     evtSource.onmessage = (e) => {
       try {
         lastSnapshot = JSON.parse(e.data);
-        if (currentTab === 'overview') renderOverview(lastSnapshot);
+        if (currentTab === 'overview') renderOverviewIfChanged(lastSnapshot);
         if (currentTab === 'agents') renderAgents(lastSnapshot);
         if (currentTab === 'schedule') renderSchedule(lastSnapshot);
       } catch(ex) {}
