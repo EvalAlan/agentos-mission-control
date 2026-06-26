@@ -1017,10 +1017,10 @@ function renderOverview(d) {
           <circle cx="70" cy="70" r="30" fill="none" stroke="rgba(255,255,255,0.04)" stroke-width="0.5"/>
           <line x1="10" y1="70" x2="130" y2="70" stroke="rgba(255,255,255,0.04)" stroke-width="0.5"/>
           <line x1="70" y1="10" x2="70" y2="130" stroke="rgba(255,255,255,0.04)" stroke-width="0.5"/>
-          <g>
-            <animateTransform attributeName="transform" type="rotate" from="0 70 70" to="360 70 70" dur="10s" repeatCount="indefinite"/>
-            <line x1="70" y1="70" x2="70" y2="10" stroke="var(--brand-cyan)" stroke-width="1.5" opacity="0.45"/>
-          </g>
+          <line x1="70" y1="70" x2="70" y2="10" stroke="var(--brand-cyan)" stroke-width="1.5" opacity="0.45">
+            <animate attributeName="x2" values="70;92.96;112.43;125.43;130;125.43;112.43;92.96;70;47.04;27.57;14.57;10;14.57;27.57;47.04;70" dur="10s" repeatCount="indefinite"/>
+            <animate attributeName="y2" values="10;14.57;27.57;47.04;70;92.96;112.43;125.43;130;125.43;112.43;92.96;70;47.04;27.57;14.57;10" dur="10s" repeatCount="indefinite"/>
+          </line>
           ${radarDots}
         </svg>
       </div>
