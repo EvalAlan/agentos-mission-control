@@ -987,7 +987,10 @@ function switchTab(name) {
   document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
   document.querySelector(`[data-tab="${name}"]`).classList.add('active');
 
-  if (name === 'overview') renderOverviewIfChanged(lastSnapshot, true);
+  if (name === 'overview') {
+    lastOverviewSignature = null;
+    fetchSnapshot();
+  }
   if (name === 'agents') renderWorkspacesIfChanged(lastSnapshot, true);
   if (name === 'tasks') loadTasks();
   if (name === 'schedule') renderScheduleIfChanged(lastSnapshot, true);
