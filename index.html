@@ -255,7 +255,11 @@
     .cron-desc { font: 400 var(--font-size-xs) var(--font-mono); color: var(--text-muted); }
     .cron-source { font: 400 var(--font-size-xs) var(--font-mono); color: var(--text-muted); opacity: 0.5; }
 
-    .content-layout { display: grid; grid-template-columns: 360px 1fr; gap: var(--space-4); }
+    .content-layout { display: grid; grid-template-columns: 360px 1fr; gap: var(--space-4); align-items: start; }
+    .content-panel {
+      max-height: calc(100vh - 96px);
+      overflow-y: auto;
+    }
     .content-sidebar {
       display: flex;
       flex-direction: column;
@@ -740,7 +744,7 @@
       <div class="content-sidebar" id="contentSidebar">
         <div class="empty-state">Loading documents...</div>
       </div>
-      <div class="glass-card" style="padding:var(--space-4);" id="contentPanel">
+      <div class="glass-card content-panel" style="padding:var(--space-4);" id="contentPanel">
         <div class="empty-state">Select a document to read</div>
       </div>
     </div>
@@ -1552,6 +1556,8 @@ window.selectDoc = async function(path) {
   setOnlyContentGroupOpen(contentGroupKey(selectedDoc));
   contentSidebarInitialized = true;
   renderContentSidebar();
+  const panel = document.getElementById('contentPanel');
+  if (panel) panel.scrollTop = 0;
   try {
     const res = await fetch('api/content/get?path=' + encodeURIComponent(path));
     const data = await res.json();
