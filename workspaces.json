@@ -5,7 +5,7 @@
       "label": "INFRA",
       "name": "Infra / AgentOS",
       "discord": "#infra",
-      "repo": "/home/rocky/agentos-mission-control",
+      "repo": "/home/rocky/repos/agentos-mission-control",
       "description": "Hermes, AgentOS dashboard, Tailscale, gateway, host services",
       "terms": [
         "agentos",
