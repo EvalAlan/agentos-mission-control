@@ -1,9 +1,4 @@
+agentos-task-worker.log
+.agentos-task-worker.lock
 __pycache__/
 *.pyc
-.DS_Store
-*.egg-info/
-dist/
-build/
-.env
-*.db
-backups/
