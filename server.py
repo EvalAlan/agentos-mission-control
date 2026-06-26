@@ -204,8 +204,57 @@ def vps_health():
     return result
 
 
-def cron_jobs():
+def hermes_cron_jobs():
     jobs = []
+    jobs_file = os.path.join(HERMES_HOME, "cron", "jobs.json")
+    if not os.path.isfile(jobs_file):
+        return jobs
+    try:
+        with open(jobs_file) as f:
+            data = json.load(f)
+    except Exception:
+        return jobs
+
+    for job in data.get("jobs", []):
+        name = job.get("name") or job.get("id") or "Hermes job"
+        schedule = job.get("schedule_display") or ""
+        if not schedule:
+            raw_schedule = job.get("schedule") or {}
+            if isinstance(raw_schedule, dict):
+                schedule = raw_schedule.get("display") or raw_schedule.get("expr") or raw_schedule.get("run_at") or ""
+            else:
+                schedule = str(raw_schedule)
+        mode = "script-only" if job.get("no_agent") else "agent"
+        script = job.get("script")
+        command = name
+        if script:
+            command = f"{name} — {script}"
+        status = "active" if job.get("enabled", True) else "paused"
+        if job.get("state") and job.get("state") != "scheduled":
+            status = str(job.get("state"))
+        next_run = job.get("next_run_at") or "not scheduled"
+        repeat = job.get("repeat") or {}
+        repeat_text = "forever" if repeat.get("times") is None else f"{repeat.get('completed', 0)}/{repeat.get('times')}"
+        description = f"{status}; next {next_run}; {mode}; repeat {repeat_text}"
+        if job.get("last_status"):
+            description += f"; last {job.get('last_status')}"
+
+        jobs.append({
+            "schedule": schedule,
+            "command": command,
+            "owner": "hermes",
+            "description": description,
+            "source": f"{jobs_file}#{job.get('id', '')}",
+            "job_id": job.get("id"),
+            "enabled": job.get("enabled", True),
+            "state": job.get("state"),
+            "next_run_at": next_run,
+        })
+    return jobs
+
+
+def cron_jobs():
+    jobs = hermes_cron_jobs()
     crontab_files = [
         "/var/spool/cron/crontabs/root",
         "/etc/crontab",
