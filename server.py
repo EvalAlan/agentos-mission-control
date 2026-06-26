@@ -125,7 +125,7 @@ def activity_data():
         return {"entries": [], "agents": {}, "totals": {"total": 0, "completed": 0, "failed": 0}, "by_day": []}
 
 
-def sessions_data():
+def sessions_data(days=None):
     conn = safe_read_db(DB_STATE)
     if not conn:
         return {"count": 0, "messages": 0, "tokens": {"input": 0, "output": 0, "cache": 0}, "recent": []}
@@ -138,13 +138,20 @@ def sessions_data():
         recent = []
 
         if "sessions" in tables:
-            count = conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+            where = ""
+            params = []
+            if days:
+                cutoff = time.time() - (days * 86400)
+                where = "WHERE started_at >= ?"
+                params = [cutoff]
+            count = conn.execute(f"SELECT COUNT(*) FROM sessions {where}", params).fetchone()[0]
             cols = {r[1] for r in conn.execute("PRAGMA table_info(sessions)").fetchall()}
             has_input = "input_tokens" in cols
             has_output = "output_tokens" in cols
             if has_input or has_output:
                 row = conn.execute(
-                    f"SELECT SUM({('input_tokens' if has_input else '0')}), SUM({('output_tokens' if has_output else '0')}) FROM sessions"
+                    f"SELECT SUM({('input_tokens' if has_input else '0')}), SUM({('output_tokens' if has_output else '0')}) FROM sessions {where}",
+                    params
                 ).fetchone()
                 tokens = {
                     "input": row[0] or 0 if has_input else 0,
@@ -530,11 +537,11 @@ def workspace_data():
         })
     return result
 
-def get_snapshot():
+def get_snapshot(days=None):
     return {
         "gateway": gateway_data(),
         "activity": activity_data(),
-        "sessions": sessions_data(),
+        "sessions": sessions_data(days=days),
         "workspaces": workspace_data(),
         "vps": vps_health(),
         "crons": cron_jobs(),
@@ -591,7 +598,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._serve_static(js, "application/javascript; charset=utf-8")
 
         elif path == "/api/snapshot":
-            self.send_json(get_snapshot())
+            params = parse_qs(urlparse(self.path).query)
+            days = None
+            if "tf" in params:
+                try:
+                    days = int(params["tf"][0])
+                except (ValueError, IndexError):
+                    days = None
+            self.send_json(get_snapshot(days=days))
 
         elif path == "/events":
             self.send_response(200)

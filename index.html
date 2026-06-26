@@ -254,6 +254,18 @@
     .cron-schedule { font: 400 var(--font-size-xs) var(--font-mono); color: var(--brand-cyan); }
     .cron-desc { font: 400 var(--font-size-xs) var(--font-mono); color: var(--text-muted); }
     .cron-source { font: 400 var(--font-size-xs) var(--font-mono); color: var(--text-muted); opacity: 0.5; }
+    .tf-btn {
+      padding: 4px 12px; border-radius: var(--radius-full);
+      font: 500 var(--font-size-xs) var(--font-mono);
+      color: var(--text-muted); cursor: pointer; border: none; background: none;
+      transition: all 0.2s ease;
+      letter-spacing: var(--letter-spacing-wide); text-transform: uppercase;
+    }
+    .tf-btn:hover { color: var(--text-primary); background: rgba(255,255,255,0.04); }
+    .tf-btn.active {
+      background: rgba(255,255,255,0.95); color: var(--bg-base);
+      box-shadow: 0 2px 12px rgba(255,255,255,0.15);
+    }
 
     .content-layout { display: grid; grid-template-columns: 360px 1fr; gap: var(--space-4); }
     .content-sidebar {
@@ -684,6 +696,15 @@
     <div class="glass-card glass-pulse" style="padding: var(--space-4); margin-bottom: var(--space-4); position: relative;">
       <div class="scan-line"></div>
       <div id="opsConsole"></div>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-3);">
+      <div></div>
+      <div style="display:flex;gap:4px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.06);border-radius:var(--radius-full);padding:3px;">
+        <button class="tf-btn active" data-tf="7" type="button">7d</button>
+        <button class="tf-btn" data-tf="14" type="button">14d</button>
+        <button class="tf-btn" data-tf="30" type="button">30d</button>
+        <button class="tf-btn" data-tf="0" type="button">ALL</button>
+      </div>
     </div>
     <div class="grid-5" id="statsStrip" style="margin-bottom: var(--space-4);"></div>
     <div class="grid-2" id="overviewBottom"></div>
@@ -1621,6 +1642,22 @@ window.saveContent = async function() {
 let lastSnapshot = null;
 let lastOverviewSignature = null;
 let lastWorkspacesSignature = null;
+let overviewTimeFrame = 7;
+
+function setOverviewTimeFrame(days) {
+  overviewTimeFrame = days;
+  document.querySelectorAll('.tf-btn').forEach(b => {
+    b.classList.toggle('active', parseInt(b.dataset.tf) === days);
+  });
+  fetchSnapshot();
+}
+
+document.addEventListener('click', (e) => {
+  const tfBtn = e.target.closest('[data-tf]');
+  if (tfBtn) {
+    setOverviewTimeFrame(parseInt(tfBtn.dataset.tf));
+  }
+});
 let lastScheduleSignature = null;
 
 function overviewSignature(d) {
@@ -1705,7 +1742,8 @@ function renderScheduleIfChanged(d, force = false) {
 
 async function fetchSnapshot() {
   try {
-    const res = await fetch('api/snapshot');
+    const tf = overviewTimeFrame ? `?tf=${overviewTimeFrame}` : '';
+    const res = await fetch('api/snapshot' + tf);
     lastSnapshot = await res.json();
     if (currentTab === 'overview') renderOverviewIfChanged(lastSnapshot);
     if (currentTab === 'agents') renderWorkspacesIfChanged(lastSnapshot);
