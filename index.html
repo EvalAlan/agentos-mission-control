@@ -255,8 +255,17 @@
     .cron-desc { font: 400 var(--font-size-xs) var(--font-mono); color: var(--text-muted); }
     .cron-source { font: 400 var(--font-size-xs) var(--font-mono); color: var(--text-muted); opacity: 0.5; }
 
-    .content-layout { display: grid; grid-template-columns: 320px 1fr; gap: var(--space-4); min-height: 60vh; }
-    .content-sidebar { display: flex; flex-direction: column; gap: 4px; overflow-y: auto; max-height: 70vh; }
+    .content-layout { display: grid; grid-template-columns: 360px 1fr; gap: var(--space-4); }
+    .content-sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      position: sticky;
+      top: 72px;
+      align-self: start;
+      max-height: calc(100vh - 96px);
+      overflow-y: auto;
+    }
     .content-agent-group {
       background: rgba(255,255,255,0.02);
       border: 1px solid rgba(255,255,255,0.06);
@@ -265,29 +274,26 @@
     }
     .content-group-toggle {
       width: 100%;
-      display: grid;
-      grid-template-columns: auto 1fr auto;
-      align-items: center;
-      justify-items: start;
+      display: flex;
+      align-items: flex-start;
       gap: var(--space-3);
-      padding: 14px 16px;
+      padding: 16px 16px 14px;
       cursor: pointer;
       border: none;
-      background: rgba(255,255,255,0.02);
+      background: none;
       color: inherit;
       font: inherit;
       text-align: left;
-      transition: background 0.2s ease, border-color 0.2s ease;
+      transition: background 0.2s ease;
     }
-    .content-group-toggle:hover { background: rgba(255,255,255,0.05); }
+    .content-group-toggle:hover { background: rgba(255,255,255,0.04); }
     .content-group-toggle:focus { outline: none; box-shadow: inset 0 0 0 1px rgba(139,92,246,0.35); }
     .content-group-toggle .content-group-chevron {
+      flex-shrink: 0;
       font: 400 14px var(--font-mono);
       color: var(--text-muted);
       transition: transform 0.2s ease;
-      justify-self: center;
-      order: -1;
-      margin-right: var(--space-2);
+      margin-top: 2px;
     }
     .content-group-open .content-group-chevron { transform: rotate(90deg); }
     .content-group-toggle .content-group-meta {
@@ -309,31 +315,28 @@
       letter-spacing: 0.01em;
       text-transform: none;
       line-height: 1.3;
-      flex-shrink: 1;
     }
     .content-group-summary {
-      font: 500 13px var(--font-mono);
+      font: 500 12px var(--font-mono);
       color: var(--text-muted);
-      letter-spacing: 0;
+      letter-spacing: 0.05em;
       text-transform: uppercase;
-      opacity: 0.75;
-      line-height: 1.4;
+      opacity: 0.7;
     }
     .content-group-preview {
       font: 400 13px var(--font-display);
       color: var(--text-muted);
-      line-height: 1.5;
-      opacity: 0.85;
+      line-height: 1.45;
+      opacity: 0.8;
       display: -webkit-box;
-      -webkit-line-clamp: 3;
+      -webkit-line-clamp: 2;
       -webkit-box-orient: vertical;
       overflow: hidden;
-      padding-top: 4px;
     }
     .content-group-docs {
       display: none;
-      padding: var(--space-3);
-      gap: var(--space-1);
+      padding: 8px 16px 14px;
+      gap: 4px;
       border-top: 1px solid rgba(255,255,255,0.04);
     }
     .content-group-open .content-group-docs { display: flex; flex-direction: column; }
@@ -342,7 +345,6 @@
       letter-spacing: 0.01em;
       text-transform: none;
       line-height: 1.3;
-      flex-shrink: 1;
     }
     .content-doc-item {
       padding: var(--space-2) var(--space-3); border-radius: var(--radius-md);
@@ -1456,15 +1458,6 @@ function installContentSidebarHandlers() {
   if (!sidebar || sidebar.dataset.bound === '1') return;
   sidebar.dataset.bound = '1';
   sidebar.addEventListener('click', (event) => {
-    const toggle = event.target.closest('[data-content-toggle]');
-    if (toggle) {
-      const group = toggle.dataset.contentToggle;
-      contentSidebarInitialized = true;
-      if (contentExpandedGroups.has(group)) contentExpandedGroups.delete(group);
-      else contentExpandedGroups.add(group);
-      renderContentSidebar();
-      return;
-    }
     const docBtn = event.target.closest('[data-content-path]');
     if (docBtn) {
       event.preventDefault();
@@ -1498,6 +1491,14 @@ async function loadContentDocs() {
   renderContentSidebar();
 }
 
+function escapeAttr(str) {
+  return String(str).replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function escapeHtml(str) {
+  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 function renderContentSidebar() {
   const grouped = {};
   contentDocs.forEach(d => {
@@ -1518,24 +1519,26 @@ function renderContentSidebar() {
     const color = contentGroupColor(group);
     const isOpen = contentExpandedGroups.has(group);
     const preview = docs.slice(0, 2).map(d => d.title || d.filename).join(' • ');
+    const groupEsc = escapeAttr(group);
+    const previewEsc = escapeHtml(preview);
     return `<div class="content-agent-group ${isOpen ? 'content-group-open' : ''}">
-      <button class="content-group-toggle" type="button" data-content-toggle="${group}">
+      <button class="content-group-toggle" type="button" onclick="toggleContentGroup('${groupEsc}')">
         <span class="content-group-chevron">›</span>
         <span class="content-group-meta">
           <div class="content-group-header">
-            <span class="content-agent-name" style="color:${color};">${group}</span>
+            <span class="content-agent-name" style="color:${color};">${escapeHtml(group)}</span>
             ${Badge({ text: String(docs.length), color, variant: 'subtle' })}
           </div>
           <span class="content-group-summary">${selectedDoc && contentGroupKey(selectedDoc) === group ? 'open' : 'click to open'}</span>
-          <span class="content-group-preview">${preview || 'No document preview available'}</span>
+          <span class="content-group-preview">${previewEsc || 'No document preview available'}</span>
         </span>
       </button>
       <div class="content-group-docs">
         ${docs.map(d => `
           <div class="content-doc-item ${selectedDoc?.path === d.path ? 'selected' : ''}" style="--agent-color:${color};">
-            <button type="button" data-content-path="${d.path}">
-              <div class="content-doc-title">${d.title}</div>
-              <div class="content-doc-filename">${d.filename}</div>
+            <button type="button" onclick="selectDoc('${escapeAttr(d.path)}')">
+              <div class="content-doc-title">${escapeHtml(d.title)}</div>
+              <div class="content-doc-filename">${escapeHtml(d.filename)}</div>
             </button>
           </div>
         `).join('')}
@@ -1543,6 +1546,13 @@ function renderContentSidebar() {
     </div>`;
   }).join('') || '<div class="empty-state">No documents yet</div>';
 }
+
+window.toggleContentGroup = function(group) {
+  contentSidebarInitialized = true;
+  if (contentExpandedGroups.has(group)) contentExpandedGroups.delete(group);
+  else contentExpandedGroups.add(group);
+  renderContentSidebar();
+};
 
 window.selectDoc = async function(path) {
   selectedDoc = contentDocs.find(d => d.path === path) || { path };
