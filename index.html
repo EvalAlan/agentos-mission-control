@@ -7,8 +7,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="tokens.css">
-  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <style>
     /* ── Glassmorphism Foundation ── */
     .glass-card {
@@ -648,12 +648,94 @@
     :root.light .scan-line { opacity: 0.3; }
     :root.light .content-sidebar { border-color: rgba(0,0,0,0.06); }
 
+    .mobile-mode #three-canvas { display: none; }
+    .mobile-mode .glass-card,
+    .mobile-mode .agent-card,
+    .mobile-mode .task-card,
+    .mobile-mode .cron-card,
+    .mobile-mode .add-task-form,
+    .mobile-mode .theme-toggle,
+    .mobile-mode .nav-bar,
+    .mobile-mode .nav-tabs {
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+    }
+    .mobile-mode .glass-card:hover,
+    .mobile-mode .agent-card:hover,
+    .mobile-mode .task-card:hover,
+    .mobile-mode .btn-primary:hover,
+    .mobile-mode .btn-secondary:hover,
+    .mobile-mode .theme-toggle:hover {
+      transform: none;
+    }
+    .mobile-mode .scan-line,
+    .mobile-mode .glass-pulse,
+    .mobile-mode .dissolve-in,
+    .mobile-mode .vanish-out,
+    .mobile-mode .tab-panel.dissolving {
+      animation: none !important;
+    }
+
     @media (max-width: 1024px) {
       .grid-ops { grid-template-columns: 1fr; }
       .grid-5 { grid-template-columns: repeat(2, 1fr); }
       .grid-4 { grid-template-columns: repeat(2, 1fr); }
       .grid-tasks { grid-template-columns: 1fr; }
       .content-layout { grid-template-columns: 1fr; }
+      #workspaceStatsGrid { grid-template-columns: 1fr !important; }
+    }
+
+    @media (max-width: 768px) {
+      .nav-bar {
+        position: sticky;
+        height: auto;
+        padding: var(--space-2) var(--space-3);
+        flex-wrap: wrap;
+        gap: var(--space-2);
+        align-items: center;
+      }
+      .nav-brand { min-width: 0; }
+      .nav-title { font-size: 14px; }
+      .nav-subtitle { font-size: 10px; }
+      .nav-tabs {
+        order: 3;
+        width: 100%;
+        overflow-x: auto;
+        overflow-y: hidden;
+        white-space: nowrap;
+        justify-content: flex-start;
+        scrollbar-width: none;
+      }
+      .nav-tabs::-webkit-scrollbar { display: none; }
+      .nav-tab { flex: 0 0 auto; padding: 6px 12px; }
+      .nav-status span:not(.nav-clock) { display: none; }
+      .nav-clock { font-size: 11px; }
+      .main-content { padding: var(--space-3); }
+      .grid-2,
+      .grid-3,
+      .grid-5,
+      .content-layout,
+      #workspaceStatsGrid,
+      #agentStats { grid-template-columns: 1fr !important; }
+      .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .section-heading { font-size: var(--font-size-2xl); }
+      .log-table { display: block; overflow-x: auto; white-space: nowrap; }
+      #opsConsole .ops-column:first-child { display: none; }
+      #opsConsole > .grid-ops { gap: var(--space-3); }
+      .content-preview-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: var(--space-2);
+      }
+    }
+
+    @media (max-width: 480px) {
+      .grid-4 { grid-template-columns: 1fr; }
+      .nav-status { display: none; }
+      .nav-ring { width: 24px; height: 24px; }
+      .nav-ring-inner { width: 18px; height: 18px; }
+      .nav-dot { width: 6px; height: 6px; }
+      .main-content { padding: var(--space-2); }
     }
   </style>
 </head>
@@ -730,7 +812,7 @@
     </div>
     <div style="margin-top:var(--space-4);">
       <div class="section-eyebrow">Workspace Statistics</div>
-      <div style="display:grid; grid-template-columns: 1fr 300px 300px; gap:var(--space-4); margin-top:var(--space-3);">
+      <div id="workspaceStatsGrid" style="display:grid; grid-template-columns: 1fr 300px 300px; gap:var(--space-4); margin-top:var(--space-3);">
         <div class="grid-2" id="agentStats" style="grid-template-columns: 1fr 1fr;"></div>
         <div class="glass-card" style="padding:var(--space-4);">
           <div class="section-eyebrow" style="margin-bottom:var(--space-3);">SESSION DISTRIBUTION</div>
@@ -784,6 +866,10 @@ import { GlassCard, Badge, StatCard, ProgressBar, ThinBar, DonutChart, drawDonut
 const savedTheme = localStorage.getItem('agentos-theme') || 'dark';
 if (savedTheme === 'light') document.documentElement.classList.add('light');
 
+const MOBILE_MODE = window.matchMedia('(max-width: 768px), (pointer: coarse)').matches;
+const REDUCED_EFFECTS = MOBILE_MODE || window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+if (MOBILE_MODE) document.documentElement.classList.add('mobile-mode');
+
 window.toggleTheme = function() {
   const isLight = document.documentElement.classList.toggle('light');
   localStorage.setItem('agentos-theme', isLight ? 'light' : 'dark');
@@ -795,8 +881,10 @@ window.toggleTheme = function() {
 // THREE.JS PARTICLE BACKGROUND
 // ══════════════════════════════════════════════════════════════
 (function initThreeBackground() {
+  if (REDUCED_EFFECTS || !window.THREE) return;
   const canvas = document.getElementById('three-canvas');
-  const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+  if (!canvas) return;
+  const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: !MOBILE_MODE });
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
@@ -805,7 +893,7 @@ window.toggleTheme = function() {
   camera.position.z = 50;
 
   // Particles
-  const PARTICLE_COUNT = 800;
+  const PARTICLE_COUNT = MOBILE_MODE ? 180 : 800;
   const geometry = new THREE.BufferGeometry();
   const positions = new Float32Array(PARTICLE_COUNT * 3);
   const colors = new Float32Array(PARTICLE_COUNT * 3);
@@ -873,7 +961,7 @@ window.toggleTheme = function() {
   scene.add(particles);
 
   // Floating lines
-  const LINE_COUNT = 20;
+  const LINE_COUNT = MOBILE_MODE ? 6 : 20;
   const lines = [];
   for (let i = 0; i < LINE_COUNT; i++) {
     const pts = [];
@@ -982,12 +1070,17 @@ function switchTab(name) {
   const oldPanel = document.getElementById('tab-' + currentTab);
   const newPanel = document.getElementById('tab-' + name);
 
-  oldPanel.classList.add('vanish-out');
-  setTimeout(() => {
+  if (REDUCED_EFFECTS) {
     oldPanel.classList.remove('active', 'vanish-out');
-    newPanel.classList.add('active', 'dissolving');
-    setTimeout(() => newPanel.classList.remove('dissolving'), 700);
-  }, 350);
+    newPanel.classList.add('active');
+  } else {
+    oldPanel.classList.add('vanish-out');
+    setTimeout(() => {
+      oldPanel.classList.remove('active', 'vanish-out');
+      newPanel.classList.add('active', 'dissolving');
+      setTimeout(() => newPanel.classList.remove('dissolving'), 700);
+    }, 350);
+  }
 
   currentTab = name;
   document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
@@ -1603,6 +1696,14 @@ function escapeHtml(str) {
   return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+function renderMarkdown(content) {
+  const text = content || '';
+  if (window.marked && typeof window.marked.parse === 'function') {
+    return window.marked.parse(text);
+  }
+  return `<pre style="white-space:pre-wrap;word-break:break-word;">${escapeHtml(text)}</pre>`;
+}
+
 function renderContentSidebar() {
   const grouped = {};
   contentDocs.forEach(d => {
@@ -1681,7 +1782,7 @@ window.selectDoc = async function(path) {
           ${editable ? '<button class="btn-secondary" id="editBtn" onclick="showEditMode()">Edit</button>' : ''}
         </div>
       </div>
-      <div id="contentBody" class="content-preview-body dissolve-in" style="animation-delay:100ms;">${marked.parse(data.content || '')}</div>
+      <div id="contentBody" class="content-preview-body dissolve-in" style="animation-delay:100ms;">${renderMarkdown(data.content || '')}</div>
       <div id="editArea" style="display:none;"></div>
     `;
     window._currentContent = data.content || '';
@@ -1838,6 +1939,10 @@ async function fetchSnapshot() {
 }
 
 function startSSE() {
+  if (MOBILE_MODE) {
+    setInterval(fetchSnapshot, 15000);
+    return;
+  }
   try {
     const evtSource = new EventSource('events');
     evtSource.onmessage = (e) => {
