@@ -4,6 +4,7 @@ Python stdlib only. Read-only connections to Hermes databases.
 """
 
 import json
+import mimetypes
 import os
 import re
 import sqlite3
@@ -562,6 +563,75 @@ def _board_tasks():
         conn.close()
 
 
+def _resolve_content_request(requested):
+    requested = (requested or "").replace("\\", "/")
+    if requested.startswith("content/"):
+        rel = requested[len("content/"):]
+        agent_dir, _, rel_path = rel.partition("/")
+        if not agent_dir or not rel_path:
+            return None
+        return {
+            "base_dir": os.path.join(CONTENT_DIR, agent_dir),
+            "rel_path": rel_path,
+            "editable": True,
+        }
+
+    if requested.startswith("workspace/"):
+        rel = requested[len("workspace/"):]
+        ws_key, _, rel_path = rel.partition("/")
+        if not ws_key or not rel_path:
+            return None
+        config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "workspaces.json")
+        try:
+            with open(config_path) as f:
+                config = json.load(f)
+        except Exception:
+            config = {"workspaces": []}
+        for ws in config.get("workspaces", []):
+            if ws.get("key") == ws_key:
+                return {
+                    "base_dir": ws.get("repo", ""),
+                    "rel_path": rel_path,
+                    "editable": False,
+                }
+    return None
+
+
+def _safe_path_under(base_dir, rel_path):
+    base_dir = os.path.abspath(base_dir)
+    candidate = os.path.abspath(os.path.normpath(os.path.join(base_dir, rel_path)))
+    if candidate != base_dir and not candidate.startswith(base_dir + os.sep):
+        return None
+    return candidate
+
+
+def _safe_read_text(base_dir, rel_path):
+    candidate = _safe_path_under(base_dir, rel_path)
+    if not candidate or not os.path.isfile(candidate):
+        return None
+    with open(candidate, encoding="utf-8", errors="replace") as f:
+        return f.read()
+
+
+def _serve_content_asset(handler, requested, src):
+    resolved = _resolve_content_request(requested)
+    if not resolved:
+        handler.send_json({"error": "Invalid document path"}, 403)
+        return
+    src = (src or "").strip().replace("\\", "/")
+    if not src or src.startswith(("http://", "https://", "data:", "blob:")):
+        handler.send_json({"error": "Unsupported asset path"}, 400)
+        return
+    doc_dir = os.path.dirname(resolved["rel_path"])
+    asset_rel = os.path.normpath(os.path.join(doc_dir, src)).replace("\\", "/")
+    asset_path = _safe_path_under(resolved["base_dir"], asset_rel)
+    if not asset_path or not os.path.isfile(asset_path):
+        handler.send_json({"error": "Asset not found"}, 404)
+        return
+    mime, _ = mimetypes.guess_type(asset_path)
+    handler._serve_static(asset_path, mime or "application/octet-stream")
+
+
 def workspace_data():
     config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "workspaces.json")
     try:
@@ -741,59 +811,22 @@ class DashboardHandler(BaseHTTPRequestHandler):
             if not requested:
                 self.send_json({"error": "Missing path parameter"}, 400)
                 return
-            requested = requested.replace("\\", "/")
-
-            def _safe_read(base_dir, rel_path):
-                base_dir = os.path.abspath(base_dir)
-                candidate = os.path.abspath(os.path.normpath(os.path.join(base_dir, rel_path)))
-                if candidate != base_dir and not candidate.startswith(base_dir + os.sep):
-                    return None
-                if not os.path.isfile(candidate):
-                    return None
-                with open(candidate, encoding="utf-8", errors="replace") as f:
-                    return f.read()
-
-            if requested.startswith("content/"):
-                rel = requested[len("content/"):]
-                agent_dir, _, rel_path = rel.partition("/")
-                if not agent_dir or not rel_path:
-                    self.send_json({"error": "Invalid path"}, 403)
-                    return
-                content = _safe_read(os.path.join(CONTENT_DIR, agent_dir), rel_path)
-                if content is None:
-                    self.send_json({"error": "File not found"}, 404)
-                    return
-                self.send_json({"content": content, "path": requested, "editable": True})
+            resolved = _resolve_content_request(requested)
+            if not resolved:
+                self.send_json({"error": "File not found"}, 404)
                 return
-
-            if requested.startswith("workspace/"):
-                rel = requested[len("workspace/"):]
-                ws_key, _, rel_path = rel.partition("/")
-                if not ws_key or not rel_path:
-                    self.send_json({"error": "Invalid path"}, 403)
-                    return
-                config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "workspaces.json")
-                try:
-                    with open(config_path) as f:
-                        config = json.load(f)
-                except Exception:
-                    config = {"workspaces": []}
-                repo = None
-                for ws in config.get("workspaces", []):
-                    if ws.get("key") == ws_key:
-                        repo = ws.get("repo", "")
-                        break
-                if not repo:
-                    self.send_json({"error": "File not found"}, 404)
-                    return
-                content = _safe_read(repo, rel_path)
-                if content is None:
-                    self.send_json({"error": "File not found"}, 404)
-                    return
-                self.send_json({"content": content, "path": requested, "editable": False})
+            content = _safe_read_text(resolved["base_dir"], resolved["rel_path"])
+            if content is None:
+                self.send_json({"error": "File not found"}, 404)
                 return
+            self.send_json({"content": content, "path": requested, "editable": bool(resolved["editable"])})
+            return
 
-            self.send_json({"error": "File not found"}, 404)
+        elif path == "/api/content/asset":
+            requested = params.get("path", [""])[0]
+            src = params.get("src", [""])[0]
+            _serve_content_asset(self, requested, src)
+            return
 
         else:
             self.send_error(404)

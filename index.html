@@ -1715,6 +1715,16 @@ function renderMarkdown(content) {
   return `<pre style="white-space:pre-wrap;word-break:break-word;">${escapeHtml(text)}</pre>`;
 }
 
+function rewriteMarkdownAssetUrls(container, docPath) {
+  if (!container || !docPath) return;
+  container.querySelectorAll('img[src]').forEach((img) => {
+    const src = (img.getAttribute('src') || '').trim();
+    if (!src || /^(https?:|data:|blob:)/i.test(src)) return;
+    img.setAttribute('src', `api/content/asset?path=${encodeURIComponent(docPath)}&src=${encodeURIComponent(src)}`);
+    if (!img.getAttribute('loading')) img.setAttribute('loading', 'lazy');
+  });
+}
+
 function slugifyHeading(text) {
   return String(text || '')
     .toLowerCase()
@@ -1839,7 +1849,9 @@ window.selectDoc = async function(path) {
       <div id="contentBody" class="content-preview-body dissolve-in" style="animation-delay:100ms;">${renderMarkdown(data.content || '')}</div>
       <div id="editArea" style="display:none;"></div>
     `;
-    enhanceMarkdownAnchors(document.getElementById('contentBody'));
+    const contentBody = document.getElementById('contentBody');
+    rewriteMarkdownAssetUrls(contentBody, path);
+    enhanceMarkdownAnchors(contentBody);
     window._currentContent = data.content || '';
     window._currentPath = path;
     window._currentEditable = editable;
