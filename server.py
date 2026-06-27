@@ -26,6 +26,7 @@ DB_STATE = os.path.join(HERMES_HOME, "state.db")
 DB_KANBAN = os.path.join(HERMES_HOME, "kanban.db")
 GATEWAY_JSON = os.path.join(HERMES_HOME, "gateway_state.json")
 BOARD_DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "board.db")
+SYDNEY_AVATAR = os.path.expanduser("~/workspace/avatars/sydney.jpg")
 
 
 def init_board_db():
@@ -539,6 +540,28 @@ def _session_matches_workspace(row, terms):
     return any(term.lower() in text for term in terms)
 
 
+def _task_matches_workspace(row, terms, repo_path=""):
+    repo_name = os.path.basename(repo_path.rstrip("/")) if repo_path else ""
+    text = " ".join(str(row.get(k) or "") for k in ("title", "notes", "status")).lower()
+    if repo_path:
+        text += f" {repo_path.lower()} {repo_name.lower()}"
+    return any(term and term.lower() in text for term in terms)
+
+
+def _board_tasks():
+    conn = safe_read_db(BOARD_DB)
+    if not conn:
+        return []
+    try:
+        return [dict(r) for r in conn.execute(
+            "SELECT id, title, status, priority, notes, created_at, updated_at FROM tasks ORDER BY COALESCE(updated_at, created_at) DESC"
+        ).fetchall()]
+    except Exception:
+        return []
+    finally:
+        conn.close()
+
+
 def workspace_data():
     config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "workspaces.json")
     try:
@@ -548,6 +571,7 @@ def workspace_data():
         config = {"workspaces": []}
 
     sessions = []
+    tasks = _board_tasks()
     conn = safe_read_db(DB_STATE)
     if conn:
         try:
@@ -555,9 +579,9 @@ def workspace_data():
                 SELECT id, source, model, started_at, ended_at, message_count, tool_call_count,
                        input_tokens, output_tokens, cache_read_tokens, title
                 FROM sessions
-                WHERE source = 'discord'
+                WHERE source IN ('discord', 'cli', 'cron')
                 ORDER BY started_at DESC
-                LIMIT 250
+                LIMIT 400
             """).fetchall()]
         except Exception:
             sessions = []
@@ -567,11 +591,23 @@ def workspace_data():
     result = []
     now = time.time()
     for ws in config.get("workspaces", []):
-        terms = ws.get("terms", []) + [ws.get("key", ""), ws.get("name", "")]
+        repo_path = ws.get("repo", "")
+        repo_name = os.path.basename(str(repo_path).rstrip("/")) if repo_path else ""
+        terms = ws.get("terms", []) + [ws.get("key", ""), ws.get("name", ""), repo_name]
         matched = [s for s in sessions if _session_matches_workspace(s, terms)]
+        active_tasks = [t for t in tasks if (t.get("status") == "in_progress") and _task_matches_workspace(t, terms, repo_path)]
         latest = matched[0] if matched else None
-        repo = _repo_info(ws.get("repo", ""))
-        last_activity = latest.get("started_at") if latest else repo.get("last_commit_ts")
+        repo = _repo_info(repo_path)
+        task_activity = 0.0
+        for t in active_tasks:
+            stamp = t.get("updated_at") or t.get("created_at")
+            if not stamp:
+                continue
+            try:
+                task_activity = max(task_activity, datetime.fromisoformat(str(stamp)).timestamp())
+            except Exception:
+                pass
+        last_activity = max([v for v in [latest.get("started_at") if latest else None, task_activity or None, repo.get("last_commit_ts")] if v is not None], default=None)
         stale_days = None
         if last_activity:
             stale_days = round((now - float(last_activity)) / 86400, 1)
@@ -579,6 +615,8 @@ def workspace_data():
             **ws,
             "repo_info": repo,
             "sessions": len(matched),
+            "active_tasks": len(active_tasks),
+            "active_task_titles": [str(t.get("title") or "") for t in active_tasks],
             "messages": sum(int(s.get("message_count") or 0) for s in matched),
             "tools": sum(int(s.get("tool_call_count") or 0) for s in matched),
             "tokens": {
@@ -659,6 +697,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
         elif path == "/components.js":
             js = os.path.join(os.path.dirname(os.path.abspath(__file__)), "components.js")
             self._serve_static(js, "application/javascript; charset=utf-8")
+
+        elif path == "/avatar/sydney.jpg":
+            self._serve_static(SYDNEY_AVATAR, "image/jpeg")
 
         elif path == "/api/snapshot":
             params = parse_qs(urlparse(self.path).query)

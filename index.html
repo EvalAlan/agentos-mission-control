@@ -78,6 +78,16 @@
       box-shadow: 0 4px 40px rgba(0,0,0,0.4);
     }
     .nav-brand { display: flex; align-items: center; gap: var(--space-2); }
+    .nav-avatar {
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      object-fit: cover;
+      border: 1px solid rgba(255,255,255,0.14);
+      box-shadow: 0 0 16px rgba(139,92,246,0.22);
+      flex: 0 0 auto;
+      background: rgba(255,255,255,0.05);
+    }
     .nav-ring {
       width: 30px; height: 30px; border-radius: 50%;
       background: conic-gradient(from 0deg, #8B5CF6, #7DD3FC, #5EE2B5, #A78BFA, #8B5CF6);
@@ -746,10 +756,10 @@
 <!-- NAV BAR -->
 <nav class="nav-bar">
   <div class="nav-brand">
-    <div class="nav-ring"><div class="nav-ring-inner"><div class="nav-dot"></div></div></div>
+    <img class="nav-avatar" src="avatar/sydney.jpg" alt="Sydney">
     <div>
-      <div class="nav-title">Hermes</div>
-      <div class="nav-subtitle">/ ORCHESTRATOR <span id="versionBadge"></span></div>
+      <div class="nav-title">Sydney</div>
+      <div class="nav-subtitle">AgentOS Mission Control</div>
     </div>
   </div>
   <div class="nav-tabs" id="navTabs">
@@ -1100,12 +1110,6 @@ document.querySelectorAll('.nav-tab').forEach(tab => {
 });
 
 // ══════════════════════════════════════════════════════════════
-// VERSION BADGE
-// ══════════════════════════════════════════════════════════════
-const VERSION = 'v1.0';
-document.getElementById('versionBadge').innerHTML = Badge({ text: VERSION, color: 'var(--text-muted)', variant: 'subtle' });
-
-// ══════════════════════════════════════════════════════════════
 // AGENT CONFIG
 // ══════════════════════════════════════════════════════════════
 const AGENTS = {
@@ -1162,9 +1166,10 @@ function renderOverview(d) {
   const totalWorkspaceSessions = workspaces.reduce((sum, w) => sum + (w.sessions || 0), 0);
   const totalMessages = workspaces.reduce((sum, w) => sum + (w.messages || 0), 0);
   const totalTools = workspaces.reduce((sum, w) => sum + (w.tools || 0), 0);
+  const totalActiveTasks = workspaces.reduce((sum, w) => sum + (w.active_tasks || 0), 0);
   const dirtyRepos = workspaces.filter(w => w.repo_info && w.repo_info.dirty).length;
   const reposFound = workspaces.filter(w => w.repo_info && w.repo_info.exists).length;
-  const activeWorkspaces = workspaces.filter(w => (w.sessions || 0) > 0).length;
+  const activeWorkspaces = workspaces.filter(w => (w.sessions || 0) > 0 || (w.active_tasks || 0) > 0).length;
   const topWorkspace = workspaces[0];
   const latestWorkspace = workspaces.slice().sort((a,b) => (b.last_activity || 0) - (a.last_activity || 0))[0];
 
@@ -1194,7 +1199,7 @@ function renderOverview(d) {
     return `<div style="display:flex;align-items:center;gap:var(--space-2);margin-bottom:6px;">
       <span style="font:500 var(--font-size-xs) var(--font-mono);color:${color};width:52px;">${w.label || w.key}</span>
       <div style="flex:1;">${ProgressBar({ pct: fill, color, height: '5px' })}</div>
-      <span style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);width:94px;text-align:right;">${w.sessions || 0} · ${repoState}</span>
+      <span style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);width:94px;text-align:right;">${w.sessions || 0}s · ${w.active_tasks || 0}t</span>
     </div>`;
   }).join('');
 
@@ -1217,7 +1222,7 @@ function renderOverview(d) {
         <span style="font:500 var(--font-size-xs) var(--font-mono);color:${color};">${repo.exists ? (repo.dirty ? 'dirty' : 'clean') : 'missing'}</span>
       </div>
       <div style="font:500 var(--font-size-sm) var(--font-display);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${w.name}</div>
-      <div style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${repo.last_commit || repo.path || ''}">${repo.branch || '—'} · ${w.sessions || 0} sessions</div>
+      <div style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${repo.last_commit || repo.path || ''}">${repo.branch || '—'} · ${w.sessions || 0} sessions · ${w.active_tasks || 0} active tasks</div>
     </div>`;
   }).join('');
 
@@ -1267,8 +1272,8 @@ function renderOverview(d) {
       <div style="text-align:center;"><div class="ops-label">WORKSPACES</div><div style="font:700 var(--font-size-lg) var(--font-mono);">${workspaces.length}</div></div>
       <div style="text-align:center;"><div class="ops-label">ACTIVE</div><div style="font:700 var(--font-size-lg) var(--font-mono);color:var(--status-active);">${activeWorkspaces}</div></div>
       <div style="text-align:center;"><div class="ops-label">SESSIONS</div><div style="font:700 var(--font-size-lg) var(--font-mono);">${totalWorkspaceSessions}</div></div>
+      <div style="text-align:center;"><div class="ops-label">IN PROGRESS</div><div style="font:700 var(--font-size-lg) var(--font-mono);color:${totalActiveTasks ? 'var(--brand-cyan)' : 'var(--text-primary)'};">${totalActiveTasks}</div></div>
       <div style="text-align:center;"><div class="ops-label">DIRTY REPOS</div><div style="font:700 var(--font-size-lg) var(--font-mono);color:${dirtyRepos ? 'var(--brand-amber)' : 'var(--status-active)'};">${dirtyRepos}</div></div>
-      <div style="text-align:center;"><div class="ops-label">TOOLS</div><div style="font:700 var(--font-size-lg) var(--font-mono);">${totalTools}</div></div>
     </div>
   `;
 
@@ -1296,14 +1301,16 @@ function renderOverview(d) {
 // ══════════════════════════════════════════════════════════════
 function renderAgents(d) {
   if (!d) return;
-  const workspaces = (d.workspaces || []).slice().sort((a,b) => (b.sessions||0) - (a.sessions||0));
+  const workspaces = (d.workspaces || []).slice().sort((a,b) => ((b.sessions||0) + (b.active_tasks||0)) - ((a.sessions||0) + (a.active_tasks||0)));
   const totalSessions = Math.max(workspaces.reduce((sum, w) => sum + (w.sessions || 0), 0), 1);
-  const active = workspaces.filter(w => (w.sessions || 0) > 0).length;
+  const totalActiveTasks = workspaces.reduce((sum, w) => sum + (w.active_tasks || 0), 0);
+  const active = workspaces.filter(w => (w.sessions || 0) > 0 || (w.active_tasks || 0) > 0).length;
   const dirty = workspaces.filter(w => w.repo_info && w.repo_info.dirty).length;
 
   document.getElementById('agentCounts').innerHTML = GlassCard({
     children: `<div style="display:flex;gap:var(--space-4);">
       <div style="text-align:center;"><div style="font:700 var(--font-size-lg) var(--font-mono);color:var(--status-active);text-shadow:0 0 15px rgba(94,226,181,0.4);">${active}</div><div style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);">Active</div></div>
+      <div style="text-align:center;"><div style="font:700 var(--font-size-lg) var(--font-mono);color:var(--brand-cyan);">${totalActiveTasks}</div><div style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);">In Progress</div></div>
       <div style="text-align:center;"><div style="font:700 var(--font-size-lg) var(--font-mono);color:${dirty ? 'var(--brand-amber)' : 'var(--status-idle)'};">${dirty}</div><div style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);">Dirty Repos</div></div>
     </div>`,
     style: 'padding: var(--space-3);'
@@ -1320,19 +1327,22 @@ function renderAgents(d) {
     const lastLabel = w.last_activity ? relativeUnix(w.last_activity) : 'never';
     const branch = repo.branch || '—';
     const language = repo.language || 'repo';
+    const activeTasks = w.active_tasks || 0;
+    const activeTaskTitle = (w.active_task_titles && w.active_task_titles[0]) || '';
 
     return `<div class="agent-card dissolve-in" style="--agent-color:${color};${staggerDelay(idx)}">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-2);">
         ${Badge({ text: w.label || w.key?.slice(0,4).toUpperCase() || 'WORK', color, variant: 'solid' })}
         <div style="display:flex;align-items:center;gap:var(--space-2);">
           <span style="font:400 var(--font-size-xs) var(--font-mono);color:var(--brand-cyan);">${w.discord || 'Discord'}</span>
-          <div style="width:6px;height:6px;border-radius:50%;background:${statusColor};box-shadow:0 0 8px ${statusColor};${w.sessions > 0 ? 'animation:pulse 2s ease infinite;' : ''}"></div>
+          <div style="width:6px;height:6px;border-radius:50%;background:${statusColor};box-shadow:0 0 8px ${statusColor};${(w.sessions > 0 || activeTasks > 0) ? 'animation:pulse 2s ease infinite;' : ''}"></div>
         </div>
       </div>
       <div style="font:500 var(--font-size-lg) var(--font-display);margin-bottom:2px;">${w.name}</div>
       <div style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);margin-bottom:var(--space-2);min-height:34px;">${w.description || ''}</div>
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-2);margin-top:var(--space-2);">
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:var(--space-2);margin-top:var(--space-2);">
         <div><div style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);">Sessions</div><div style="font:500 var(--font-size-sm) var(--font-mono);">${w.sessions || 0}</div></div>
+        <div><div style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);">Tasks</div><div style="font:500 var(--font-size-sm) var(--font-mono);color:${activeTasks ? 'var(--brand-cyan)' : 'var(--text-primary)'};">${activeTasks}</div></div>
         <div><div style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);">Branch</div><div style="font:500 var(--font-size-sm) var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${branch}">${branch}</div></div>
         <div><div style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);">Repo</div><div style="font:500 var(--font-size-sm) var(--font-mono);color:${statusColor};">${statusText}</div></div>
       </div>
@@ -1340,7 +1350,8 @@ function renderAgents(d) {
       <div style="margin-top:var(--space-2);display:flex;justify-content:space-between;gap:var(--space-2);font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);">
         <span>${language}</span><span>${lastLabel}</span>
       </div>
-      ${latest.title ? `<div style="margin-top:var(--space-2);font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${latest.title}">↳ ${latest.title}</div>` : ''}
+      ${activeTaskTitle ? `<div style="margin-top:var(--space-2);font:500 var(--font-size-xs) var(--font-mono);color:var(--brand-cyan);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${activeTaskTitle}">▶ ${activeTaskTitle}</div>` : ''}
+      ${latest.title ? `<div style="margin-top:4px;font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${latest.title}">↳ ${latest.title}</div>` : ''}
       ${repo.last_commit ? `<div style="margin-top:4px;font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${repo.last_commit}">git ${repo.last_commit}</div>` : ''}
     </div>`;
   }).join('');
