@@ -1352,7 +1352,7 @@ function renderModelDonut(breakdownEntries) {
   const total = breakdownEntries.reduce((sum, [, count]) => sum + count, 0);
   const slices = breakdownEntries.map(([model, count]) => ({
     model,
-    count,
+    value: count,
     color: modelColor(model),
     pct: Math.round((count / total) * 100),
   }));
@@ -1363,7 +1363,7 @@ function renderModelDonut(breakdownEntries) {
         <div style="width:8px;height:8px;border-radius:50%;background:${s.color};box-shadow:0 0 8px ${s.color};"></div>
         <span style="font:500 var(--font-size-xs) var(--font-mono);color:var(--text-primary);">${s.model}</span>
       </div>
-      <span style="font:500 var(--font-size-xs) var(--font-mono);color:var(--brand-cyan);">${s.count} (${s.pct}%)</span>
+      <span style="font:500 var(--font-size-xs) var(--font-mono);color:var(--brand-cyan);">${s.value} (${s.pct}%)</span>
     </div>`
   ).join('');
 
