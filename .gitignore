@@ -1,5 +1,6 @@
 agentos-task-worker.log
 .agentos-task-worker.lock
+.agentos-task-worker.pid
 __pycache__/
 *.pyc
 board.db
