@@ -1325,20 +1325,35 @@ function relativeUnix(ts) {
 }
 
 const MODEL_PALETTE = {
-  'claude-sonnet-4': 'var(--brand-violet)',
-  'gpt-5.5': 'var(--brand-cyan)',
-  'gpt-4o': 'var(--brand-gold)',
-  'gpt-4o-mini': 'var(--brand-magenta)',
-  'owl-alpha': 'var(--brand-teal)',
-  'claude-opus-4': '#b366ff',
-  'gemini-2.5-pro': '#ff6b9d',
-  'mistral-large': '#ffb347',
-  'llama-3.1-70b': '#7ec8e3',
-  'default': 'var(--status-active)',
+  'claude-sonnet-4': '#a855f7',
+  'claude-opus-4': '#7c3aed',
+  'gpt-5.5': '#38bdf8',
+  'gpt-5.4': '#0ea5e9',
+  'gpt-5.4-mini': '#06b6d4',
+  'gpt-5.3-codex': '#f59e0b',
+  'gpt-4o': '#fbbf24',
+  'gpt-4o-mini': '#ec4899',
+  'owl-alpha': '#10b981',
+  'gemini-2.5-pro': '#ef4444',
+  'mistral-large': '#fb7185',
+  'llama-3.1-70b': '#84cc16',
+  'unknown': '#94a3b8',
+  'default': '#14b8a6',
 };
 
+function hashColor(str) {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) hash = ((hash << 5) - hash) + str.charCodeAt(i);
+  const hue = Math.abs(hash) % 360;
+  return `hsl(${hue} 72% 58%)`;
+}
+
 function modelColor(model) {
-  return MODEL_PALETTE[model] || MODEL_PALETTE['default'];
+  const raw = String(model || 'unknown').trim().toLowerCase();
+  const normalized = raw.includes('/') ? raw.split('/').pop() : raw;
+  return MODEL_PALETTE[raw]
+    || MODEL_PALETTE[normalized]
+    || (raw === 'unknown' ? MODEL_PALETTE.unknown : hashColor(raw));
 }
 
 function renderModelDonut(breakdownEntries) {
