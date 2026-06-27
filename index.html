@@ -700,9 +700,9 @@
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-3);">
       <div></div>
       <div style="display:flex;gap:4px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.06);border-radius:var(--radius-full);padding:3px;">
-        <button class="tf-btn active" data-tf="7" type="button">7d</button>
+        <button class="tf-btn" data-tf="7" type="button">7d</button>
         <button class="tf-btn" data-tf="14" type="button">14d</button>
-        <button class="tf-btn" data-tf="30" type="button">30d</button>
+        <button class="tf-btn active" data-tf="30" type="button">30d</button>
         <button class="tf-btn" data-tf="0" type="button">ALL</button>
       </div>
     </div>
@@ -1645,7 +1645,7 @@ window.saveContent = async function() {
 let lastSnapshot = null;
 let lastOverviewSignature = null;
 let lastWorkspacesSignature = null;
-let overviewTimeFrame = 7;
+let overviewTimeFrame = 30;
 
 function setOverviewTimeFrame(days) {
   overviewTimeFrame = days;
