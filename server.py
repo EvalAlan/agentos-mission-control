@@ -178,7 +178,7 @@ def activity_data():
 def sessions_data(days=None):
     conn = safe_read_db(DB_STATE)
     if not conn:
-        return {"count": 0, "messages": 0, "tokens": {"input": 0, "output": 0, "cache": 0}, "recent": []}
+        return {"count": 0, "messages": 0, "tokens": {"input": 0, "output": 0, "cache": 0}, "recent": [], "model_breakdown": {}}
     try:
         tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
 
@@ -220,6 +220,11 @@ def sessions_data(days=None):
             else:
                 recent = []
 
+            model_breakdown = {}
+            if "model" in cols:
+                for row in conn.execute("SELECT model, COUNT(*) FROM sessions GROUP BY model ORDER BY COUNT(*) DESC").fetchall():
+                    model_breakdown[row[0] or "unknown"] = row[1]
+
         if "messages" in tables:
             messages = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
 
@@ -229,10 +234,10 @@ def sessions_data(days=None):
                 tokens = {"input": row[0] or 0, "output": row[1] or 0, "cache": row[2] or 0}
 
         conn.close()
-        return {"count": count, "messages": messages, "tokens": tokens, "recent": recent}
+        return {"count": count, "messages": messages, "tokens": tokens, "recent": recent, "model_breakdown": model_breakdown}
     except Exception:
         conn.close()
-        return {"count": 0, "messages": 0, "tokens": {"input": 0, "output": 0, "cache": 0}, "recent": []}
+        return {"count": 0, "messages": 0, "tokens": {"input": 0, "output": 0, "cache": 0}, "recent": [], "model_breakdown": {}}
 
 
 def vps_health():

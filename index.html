@@ -150,6 +150,7 @@
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); }
     .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-3); }
     .grid-5 { display: grid; grid-template-columns: repeat(5, 1fr); gap: var(--space-3); }
+    .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-3); }
     .grid-ops { display: grid; grid-template-columns: 180px 1fr 1fr; gap: var(--space-5); }
     .grid-tasks { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-4); }
 
@@ -650,6 +651,7 @@
     @media (max-width: 1024px) {
       .grid-ops { grid-template-columns: 1fr; }
       .grid-5 { grid-template-columns: repeat(2, 1fr); }
+      .grid-4 { grid-template-columns: repeat(2, 1fr); }
       .grid-tasks { grid-template-columns: 1fr; }
       .content-layout { grid-template-columns: 1fr; }
     }
@@ -1302,8 +1304,9 @@ function renderAgents(d) {
 
   const modelContainer = document.getElementById('modelDonutContainer');
   if (modelContainer) {
-    const recentSessions = (d.sessions && d.sessions.recent) ? d.sessions.recent.slice(0, 25) : [];
-    modelContainer.innerHTML = renderModelDonut(recentSessions);
+    const breakdown = (d.sessions && d.sessions.model_breakdown) ? d.sessions.model_breakdown : {};
+    const breakdownArr = Object.entries(breakdown);
+    modelContainer.innerHTML = renderModelDonut(breakdownArr);
     requestAnimationFrame(() => {
       const mc = document.getElementById('modelDonutCanvas');
       if (mc) drawDonut(mc);
@@ -1327,6 +1330,10 @@ const MODEL_PALETTE = {
   'gpt-4o': 'var(--brand-gold)',
   'gpt-4o-mini': 'var(--brand-magenta)',
   'owl-alpha': 'var(--brand-teal)',
+  'claude-opus-4': '#b366ff',
+  'gemini-2.5-pro': '#ff6b9d',
+  'mistral-large': '#ffb347',
+  'llama-3.1-70b': '#7ec8e3',
   'default': 'var(--status-active)',
 };
 
@@ -1334,23 +1341,16 @@ function modelColor(model) {
   return MODEL_PALETTE[model] || MODEL_PALETTE['default'];
 }
 
-function renderModelDonut(sessions) {
-  if (!sessions || !sessions.length) {
+function renderModelDonut(breakdownEntries) {
+  if (!breakdownEntries || !breakdownEntries.length) {
     return `<div style="display:flex;justify-content:center;align-items:center;padding:var(--space-3);">
       <canvas id="modelDonutCanvas" width="160" height="160" style="width:160px;height:160px;"></canvas>
     </div>
     <div id="modelDonutLegend" style="margin-top:var(--space-2);"></div>`;
   }
 
-  const counts = {};
-  for (const s of sessions) {
-    const m = s.model || 'unknown';
-    counts[m] = (counts[m] || 0) + 1;
-  }
-
-  const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
-  const total = sessions.length;
-  const slices = entries.map(([model, count]) => ({
+  const total = breakdownEntries.reduce((sum, [, count]) => sum + count, 0);
+  const slices = breakdownEntries.map(([model, count]) => ({
     model,
     count,
     color: modelColor(model),
