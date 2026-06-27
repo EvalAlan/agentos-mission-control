@@ -125,7 +125,7 @@ def _auto_pull_pending() -> dict[str, object] | None:
                 dep_status = conn.execute(
                     "SELECT status FROM tasks WHERE id = ?", (dep_id,)
                 ).fetchone()
-                if not dep_status or dep_status["status"] != "done":
+                if not dep_status or dep_status["status"] not in ("review", "done"):
                     blocked = True
                     break
             if not blocked:
@@ -276,7 +276,7 @@ def run_task(task: Mapping[str, object]) -> None:
 
     if proc.returncode == 0:
         log(f"completed {task_id}")
-        append_result(task_id, "done", "WORKER COMPLETED", output)
+        append_result(task_id, "review", "WORKER COMPLETED", output)
     else:
         log(f"failed {task_id} rc={proc.returncode}")
         append_result(task_id, "pending", f"WORKER FAILED rc={proc.returncode}", output)

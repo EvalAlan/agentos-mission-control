@@ -773,7 +773,7 @@ def _board_tasks():
             t["depends_on"] = dep_map.get(t["id"], [])
             t["blocked"] = any(
                 dep_id not in {tt["id"]: tt["status"] for tt in tasks} or
-                {tt["id"]: tt["status"] for tt in tasks}[dep_id] != "done"
+                {tt["id"]: tt["status"] for tt in tasks}[dep_id] not in ("review", "done")
                 for dep_id in t["depends_on"]
             )
         return tasks
@@ -1076,13 +1076,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
             tasks = _board_tasks()
             pending = [t for t in tasks if t["status"] == "pending"]
             in_progress = [t for t in tasks if t["status"] == "in_progress"]
-            done = [t for t in tasks if t["status"] == "done"]
+            review = [t for t in tasks if t["status"] == "review"]
             blocked = [t for t in tasks if t.get("blocked")]
             self.send_json({
                 "total": len(tasks),
                 "pending": len(pending),
                 "in_progress": len(in_progress),
-                "done": len(done),
+                "review": len(review),
                 "blocked": len(blocked),
                 "tasks": [
                     {"id": t["id"], "title": t["title"], "status": t["status"],

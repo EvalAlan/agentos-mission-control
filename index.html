@@ -1130,6 +1130,12 @@ const AGENTS = {
 // ══════════════════════════════════════════════════════════════
 // HELPERS
 // ══════════════════════════════════════════════════════════════
+window.escHtml = function(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+};
+
 function relativeTime(iso) {
   if (!iso) return 'never';
   const diff = (Date.now() - new Date(iso).getTime()) / 1000;
@@ -1591,8 +1597,8 @@ function renderWorkerControls() {
 }
 
 function renderTaskBoard() {
-  const cols = ['pending', 'in_progress', 'done'];
-  const labels = ['Pending', 'In Progress', 'Done'];
+  const cols = ['pending', 'in_progress', 'review'];
+  const labels = ['Pending', 'In Progress', 'Review'];
   document.getElementById('taskBoardControls').innerHTML = renderWorkerControls();
   document.getElementById('taskBoard').innerHTML = cols.map((col, i) => {
     const tasks = boardData.filter(t => t.status === col);
@@ -1603,13 +1609,13 @@ function renderTaskBoard() {
           <div class="task-title">${t.title}</div>
           <span class="priority-chip priority-${t.priority}">${t.priority}</span>
         </div>
-        ${t.notes ? `<div class="task-notes">${t.notes}</div>` : ''}
+        ${t.notes ? `<div class="task-notes">${escHtml(t.notes.length > 200 ? t.notes.substring(0, 200) + '…' : t.notes)}</div>` : ''}
         <div class="task-footer">
           <span class="task-time">${relativeTime(t.created_at)}</span>
           <div class="task-actions">
-            ${col !== 'pending' ? `<button class="task-btn" onclick="moveTask('${t.id}','${col === 'done' ? 'in_progress' : 'pending'}')">◀</button>` : ''}
-            ${col !== 'done' ? `<button class="task-btn" onclick="moveTask('${t.id}','${col === 'pending' ? 'in_progress' : 'done'}')">▶</button>` : ''}
-            <button class="task-btn" onclick="deleteTask('${t.id}')">✕</button>
+            ${col !== 'pending' ? `<button class="task-btn" onclick="moveTask('${t.id}','${col === 'review' ? 'in_progress' : 'pending'}')">◀</button>` : ''}
+            ${col === 'review' ? `<button class="task-btn" style="color:#4ade80;" onclick="deleteTask('${t.id}')" title="Clear from board">✓</button>` : `<button class="task-btn" onclick="moveTask('${t.id}','${col === 'pending' ? 'in_progress' : 'review'}')">▶</button>`}
+            ${col !== 'review' ? `<button class="task-btn" onclick="deleteTask('${t.id}')">✕</button>` : ''}
           </div>
         </div>
       </div>
