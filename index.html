@@ -840,9 +840,10 @@
   </div>
 
   <!-- TASKS TAB -->
-  <div class="tab-panel" id="tab-tasks">
+  <div class="tab-panel" id="tasksView" style="display:none;">
     <div class="section-eyebrow">OPERATOR BOARD</div>
     <div class="section-heading">Your Tasks</div>
+    <div id="taskBoardControls" style="margin-bottom:var(--space-3);"></div>
     <div class="grid-tasks" id="taskBoard"></div>
   </div>
 
@@ -1588,7 +1589,8 @@ function renderWorkerControls() {
 function renderTaskBoard() {
   const cols = ['pending', 'in_progress', 'done'];
   const labels = ['Pending', 'In Progress', 'Done'];
-  document.getElementById('taskBoard').innerHTML = renderWorkerControls() + cols.map((col, i) => {
+  document.getElementById('taskBoardControls').innerHTML = renderWorkerControls();
+  document.getElementById('taskBoard').innerHTML = cols.map((col, i) => {
     const tasks = boardData.filter(t => t.status === col);
     const addBtn = col === 'pending' ? `<button class="btn-secondary" style="font-size:11px;padding:3px 10px;" onclick="showAddTask()">+ Add</button>` : '';
     const cards = tasks.map((t, ti) => `
