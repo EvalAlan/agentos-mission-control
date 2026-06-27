@@ -1217,7 +1217,7 @@ function renderOverview(d) {
   }).join('');
 
   const recentSessions = (sessions.recent || []).slice(0, 8).map((s, i) => {
-    const title = s.title || s.id || 'untitled session';
+    const title = s.display_title || s.title || s.id || 'untitled session';
     const source = (s.source || 'session').toUpperCase();
     return `<div class="dissolve-in" style="display:flex;align-items:center;gap:var(--space-2);padding:7px 0;border-bottom:1px solid rgba(255,255,255,0.04);${staggerDelay(i)}">
       ${Badge({ text: source.slice(0,4), color: 'var(--brand-cyan)', variant: 'solid' })}

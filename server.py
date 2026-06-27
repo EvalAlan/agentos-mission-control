@@ -219,6 +219,7 @@ def sessions_data(days=None):
             if safe_cols:
                 col_sql = ", ".join(safe_cols)
                 recent = [dict(r) for r in conn.execute(f"SELECT {col_sql} FROM sessions ORDER BY rowid DESC LIMIT 25").fetchall()]
+                recent = _annotate_recent_sessions(recent, _board_tasks())
             else:
                 recent = []
 
@@ -538,15 +539,72 @@ def _content_docs():
 
 def _session_matches_workspace(row, terms):
     text = " ".join(str(row.get(k) or "") for k in ("title", "id", "source", "model")).lower()
-    return any(term.lower() in text for term in terms)
+    return any(term.lower() in text for term in terms if term)
 
 
 def _task_matches_workspace(row, terms, repo_path=""):
+    title = str(row.get("title") or "").strip().lower()
+    notes = str(row.get("notes") or "").strip().lower()
+    text = f"{title}\n{notes}"
     repo_name = os.path.basename(repo_path.rstrip("/")) if repo_path else ""
-    text = " ".join(str(row.get(k) or "") for k in ("title", "notes", "status")).lower()
-    if repo_path:
-        text += f" {repo_path.lower()} {repo_name.lower()}"
-    return any(term and term.lower() in text for term in terms)
+    strong_terms = []
+    for term in terms:
+        term = str(term or "").strip().lower()
+        if len(term) < 3:
+            continue
+        strong_terms.append(term)
+    if repo_name:
+        strong_terms.append(repo_name.lower())
+    strong_terms = list(dict.fromkeys(strong_terms))
+    for term in strong_terms:
+        if title.startswith(term + ":") or title.startswith(term + " —") or title.startswith(term + "-"):
+            return True
+        if re.search(rf"\b{re.escape(term)}\b", text):
+            return True
+    return False
+
+
+def _task_timestamp(row):
+    for key in ("updated_at", "created_at"):
+        stamp = row.get(key)
+        if not stamp:
+            continue
+        try:
+            return datetime.fromisoformat(str(stamp)).timestamp()
+        except Exception:
+            continue
+    return None
+
+
+def _annotate_recent_sessions(recent, tasks):
+    annotated = []
+    task_rows = []
+    for task in tasks:
+        ts = _task_timestamp(task)
+        if ts is None:
+            continue
+        task_rows.append((ts, task))
+    for row in recent:
+        item = dict(row)
+        title = str(item.get("title") or "").strip()
+        display_title = title or str(item.get("id") or "").strip()
+        if not title and item.get("source") in ("cli", "cron"):
+            started_at = item.get("started_at")
+            nearest = None
+            nearest_delta = None
+            if started_at is not None:
+                for ts, task in task_rows:
+                    delta = abs(float(started_at) - ts)
+                    if nearest_delta is None or delta < nearest_delta:
+                        nearest = task
+                        nearest_delta = delta
+            if nearest and nearest_delta is not None and nearest_delta <= 1800:
+                task_title = str(nearest.get("title") or "").strip()
+                if task_title:
+                    display_title = task_title
+        item["display_title"] = display_title
+        annotated.append(item)
+    return annotated
 
 
 def _board_tasks():
@@ -674,7 +732,16 @@ def workspace_data():
         latest = matched[0] if matched else None
         repo = _repo_info(repo_path)
         active_task_titles = [str(t.get("title") or "").strip() for t in active_tasks if str(t.get("title") or "").strip()]
-        active_task_label = f"{ws.get('name')}: {active_task_titles[0]}" if active_task_titles else ""
+        active_task_label = ""
+        if active_task_titles:
+            raw_task_title = active_task_titles[0]
+            ws_name = str(ws.get("name") or "").strip()
+            ws_key = str(ws.get("key") or "").strip()
+            lowered = raw_task_title.lower()
+            if (ws_name and lowered.startswith(ws_name.lower() + ":")) or (ws_key and lowered.startswith(ws_key.lower() + ":")):
+                active_task_label = raw_task_title
+            else:
+                active_task_label = f"{ws_name or ws_key}: {raw_task_title}"
         latest_title = str((latest or {}).get("title") or "").strip()
         latest_display_title = latest_title
         if _looks_like_session_id(latest_title) and active_task_label:
