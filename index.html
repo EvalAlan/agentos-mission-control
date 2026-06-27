@@ -163,6 +163,8 @@
     .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-3); }
     .grid-ops { display: grid; grid-template-columns: 180px 1fr 1fr; gap: var(--space-5); }
     .grid-tasks { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-4); }
+    .workspace-lane-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: var(--space-3); }
+    .repo-board-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: var(--space-2); }
 
     .ops-column { display: flex; flex-direction: column; gap: var(--space-3); }
     .ops-label {
@@ -811,7 +813,7 @@
       <div class="section-heading">Repos + Discord lanes.</div>
       <div id="agentCounts"></div>
     </div>
-    <div class="grid-5" id="agentCards" style="margin-bottom:var(--space-4);"></div>
+    <div class="workspace-lane-grid" id="agentCards" style="margin-bottom:var(--space-4);"></div>
     <div class="filter-row" id="logFilters"></div>
     <div class="glass-card" style="padding: var(--space-4); max-height: 420px; overflow-y: auto; position: relative;">
       <div class="scan-line" style="animation-duration:10s;"></div>
@@ -1287,7 +1289,7 @@ function renderOverview(d) {
   document.getElementById('overviewBottom').innerHTML = `
     <div class="glass-card glow-violet" style="padding:var(--space-4);">
       <div class="section-eyebrow">REPO BOARD</div>
-      <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-2);margin-top:var(--space-3);">${repoGrid}</div>
+      <div class="repo-board-grid" style="margin-top:var(--space-3);">${repoGrid}</div>
     </div>
     <div class="glass-card glow-cyan" style="padding:var(--space-4);">
       <div class="section-eyebrow">RECENT HERMES SESSIONS</div>
