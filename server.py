@@ -73,14 +73,64 @@ def gateway_data():
     try:
         with open(GATEWAY_JSON) as f:
             data = json.load(f)
+        pid = data.get("pid")
+        uptime = "N/A"
+        if pid:
+            try:
+                elapsed = _process_elapsed_seconds(int(pid))
+                if elapsed is not None:
+                    uptime = _format_duration(elapsed)
+            except Exception:
+                pass
         return {
-            "state": data.get("state", "unknown"),
+            "state": data.get("gateway_state", "unknown"),
             "platforms": data.get("platforms", []),
-            "active_agents": len(data.get("active_agents", [])),
-            "uptime": data.get("uptime", "N/A"),
+            "active_agents": data.get("active_agents", 0) if isinstance(data.get("active_agents"), int) else len(data.get("active_agents", [])),
+            "uptime": uptime,
         }
     except Exception:
         return {"state": "error", "platforms": [], "active_agents": 0, "uptime": "N/A"}
+
+
+def _process_elapsed_seconds(pid: int):
+    """Return elapsed seconds since the given PID started, or None."""
+    try:
+        stat_path = Path(f"/proc/{pid}/stat")
+        if not stat_path.exists():
+            return None
+        start_ticks = int(stat_path.read_text(encoding="utf-8").split()[21])
+        clk_tck = os.sysconf("SC_CLK_TCK")
+        uptime_seconds = _uptime_seconds()
+        if uptime_seconds is None:
+            return None
+        process_start_seconds = start_ticks / clk_tck
+        elapsed = max(0, uptime_seconds - process_start_seconds)
+        return elapsed
+    except Exception:
+        return None
+
+
+def _uptime_seconds():
+    try:
+        with open("/proc/uptime") as f:
+            return float(f.read().split()[0])
+    except Exception:
+        return None
+
+
+def _format_duration(seconds: float) -> str:
+    seconds = int(seconds)
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        return f"{seconds // 60}m"
+    if seconds < 86400:
+        h = seconds // 3600
+        m = (seconds % 3600) // 60
+        return f"{h}h {m}m"
+    d = seconds // 86400
+    h = (seconds % 86400) // 3600
+    return f"{d}d {h}h"
 
 
 def activity_data():

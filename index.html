@@ -511,7 +511,6 @@
     .glow-violet { box-shadow: 0 0 30px rgba(139,92,246,0.15); }
     .glow-cyan { box-shadow: 0 0 30px rgba(125,211,252,0.15); }
     .glow-mint { box-shadow: 0 0 30px rgba(94,226,181,0.15); }
-    .glow-gold { box-shadow: 0 0 30px rgba(251,191,36,0.15); }
 
     /* ── Scan Line Effect ── */
     .scan-line {
@@ -707,7 +706,7 @@
         <button class="tf-btn" data-tf="0" type="button">ALL</button>
       </div>
     </div>
-    <div class="grid-5" id="statsStrip" style="margin-bottom: var(--space-4);"></div>
+    <div class="grid-4" id="statsStrip" style="margin-bottom: var(--space-4);"></div>
     <div class="grid-2" id="overviewBottom"></div>
   </div>
 
@@ -729,12 +728,16 @@
     </div>
     <div style="margin-top:var(--space-4);">
       <div class="section-eyebrow">Workspace Statistics</div>
-      <div style="display:grid; grid-template-columns: 1fr 300px; gap:var(--space-4); margin-top:var(--space-3);">
+      <div style="display:grid; grid-template-columns: 1fr 300px 300px; gap:var(--space-4); margin-top:var(--space-3);">
         <div class="grid-2" id="agentStats" style="grid-template-columns: 1fr 1fr;"></div>
         <div class="glass-card" style="padding:var(--space-4);">
           <div class="section-eyebrow" style="margin-bottom:var(--space-3);">SESSION DISTRIBUTION</div>
           <div style="display:flex;justify-content:center;"><canvas id="donutCanvas" width="130" height="130" style="width:130px;height:130px;"></canvas></div>
           <div id="donutLegend" style="margin-top:var(--space-3);"></div>
+        </div>
+        <div class="glass-card" style="padding:var(--space-4);">
+          <div class="section-eyebrow" style="margin-bottom:var(--space-3);">MODELS USED</div>
+          <div id="modelDonutContainer"></div>
         </div>
       </div>
     </div>
@@ -1074,8 +1077,6 @@ function renderOverview(d) {
   const ramColor = vps.ram_pct > 85 ? 'var(--brand-red)' : vps.ram_pct > 70 ? 'var(--brand-amber)' : 'var(--brand-cyan)';
   const diskColor = vps.disk_pct > 85 ? 'var(--brand-red)' : vps.disk_pct > 70 ? 'var(--brand-amber)' : 'var(--brand-cyan)';
   const uptime = gw.uptime || 'N/A';
-  const startEpoch = gw.start_time ? Number(gw.start_time) : null;
-  const uptimeStr = startEpoch ? humanUptime(startEpoch) : (gw.uptime || 'N/A');
 
   const maxSessions = Math.max(...workspaces.map(w => w.sessions || 0), 1);
   const radarDots = workspaces.map((w, i) => {
@@ -1164,7 +1165,7 @@ function renderOverview(d) {
           <div><div style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);">DISK ${vps.disk_pct || 0}%</div>${ProgressBar({ pct: vps.disk_pct || 0, color: diskColor })}</div>
         </div>
         <div class="ops-label">TAILNET SERVE</div>
-        <div style="font:500 var(--font-size-sm) var(--font-mono);color:var(--brand-gold);text-shadow:0 0 15px rgba(251,191,36,0.3);">/agentos/ · ${uptimeStr}</div>
+        <div style="font:500 var(--font-size-sm) var(--font-mono);color:var(--brand-gold);text-shadow:0 0 15px rgba(251,191,36,0.3);">/agentos/ · ${uptime}</div>
       </div>
     </div>
     <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:var(--space-3);margin-top:var(--space-4);">
@@ -1181,7 +1182,6 @@ function renderOverview(d) {
     StatCard({ label: 'WORKSPACE SESSIONS', value: totalWorkspaceSessions, accent: 'var(--brand-cyan)', barWidth: '100%' }),
     StatCard({ label: 'MESSAGES', value: totalMessages.toLocaleString(), accent: 'var(--brand-violet)', barWidth: '100%' }),
     StatCard({ label: 'TOTAL TOKENS', value: ((sessions.tokens?.input || 0) + (sessions.tokens?.output || 0)).toLocaleString(), accent: 'var(--brand-gold)', barWidth: '100%' }),
-    StatCard({ label: 'TOP LANE', value: topWorkspace ? (topWorkspace.label || topWorkspace.key).toUpperCase() : '—', accent: 'var(--brand-magenta)', barWidth: topWorkspace ? Math.round(((topWorkspace.sessions || 0) / Math.max(totalWorkspaceSessions, 1))*100)+'%' : '0%', subtext: topWorkspace ? `${topWorkspace.sessions || 0} sessions` : '' }),
   ].join('');
 
   document.getElementById('overviewBottom').innerHTML = `
@@ -1193,16 +1193,7 @@ function renderOverview(d) {
       <div class="section-eyebrow">RECENT HERMES SESSIONS</div>
       <div style="max-height:260px;overflow-y:auto;margin-top:var(--space-2);">${recentSessions || '<div class="empty-state">No recent sessions</div>'}</div>
     </div>
-    <div class="glass-card glow-gold" style="padding:var(--space-4);">
-      <div class="section-eyebrow">MODELS USED</div>
-      ${(sessions.recent || []).length ? renderModelDonut((sessions.recent || []).slice(0, 25)) : '<div class="empty-state">No session data yet</div>'}
-    </div>
   `;
-
-  requestAnimationFrame(() => {
-    const mc = document.getElementById('modelDonutCanvas');
-    if (mc) drawDonut(mc);
-  });
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1308,6 +1299,16 @@ function renderAgents(d) {
       </div>`;
     }).join('');
   });
+
+  const modelContainer = document.getElementById('modelDonutContainer');
+  if (modelContainer) {
+    const recentSessions = (d.sessions && d.sessions.recent) ? d.sessions.recent.slice(0, 25) : [];
+    modelContainer.innerHTML = renderModelDonut(recentSessions);
+    requestAnimationFrame(() => {
+      const mc = document.getElementById('modelDonutCanvas');
+      if (mc) drawDonut(mc);
+    });
+  }
 }
 
 function relativeUnix(ts) {
@@ -1318,17 +1319,6 @@ function relativeUnix(ts) {
   if (diff < 3600) return `${Math.floor(diff/60)}m ago`;
   if (diff < 86400) return `${Math.floor(diff/3600)}h ago`;
   return `${Math.floor(diff/86400)}d ago`;
-}
-
-function humanUptime(startTimestamp) {
-  const now = Math.floor(Date.now() / 1000);
-  const elapsed = Math.max(0, now - Number(startTimestamp));
-  if (elapsed < 60) return `${elapsed}s`;
-  if (elapsed < 3600) return `${Math.floor(elapsed / 60)}m`;
-  if (elapsed < 86400) return `${Math.floor(elapsed / 3600)}h ${Math.floor((elapsed % 3600) / 60)}m`;
-  const days = Math.floor(elapsed / 86400);
-  const hours = Math.floor((elapsed % 86400) / 3600);
-  return `${days}d ${hours}h`;
 }
 
 const MODEL_PALETTE = {
