@@ -25,6 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 BOARD_DB = ROOT / "board.db"
 LOG_PATH = ROOT / "agentos-task-worker.log"
 LOCK_PATH = ROOT / ".agentos-task-worker.lock"
+PID_PATH = ROOT / ".agentos-task-worker.pid"
 POLL_SECONDS = int(os.environ.get("AGENTOS_TASK_WORKER_POLL_SECONDS", "10"))
 MAX_OUTPUT_CHARS = int(os.environ.get("AGENTOS_TASK_WORKER_MAX_OUTPUT_CHARS", "6000"))
 TASK_TIMEOUT_SECONDS = int(os.environ.get("AGENTOS_TASK_WORKER_TIMEOUT_SECONDS", "7200"))
@@ -98,15 +99,67 @@ def is_claimed(notes: str) -> bool:
     return bool(CLAIM_RE.search(notes or ""))
 
 
+def _fetch_order_clause() -> str:
+    return "ORDER BY CASE priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, COALESCE(updated_at, created_at) ASC"
+
+
+def _auto_pull_pending() -> dict[str, object] | None:
+    """Pull the next unblocked pending task into in_progress."""
+    conn = connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        rows = conn.execute(
+            f"""SELECT * FROM tasks
+                WHERE status = 'pending'
+                {_fetch_order_clause()}"""
+        ).fetchall()
+        task = None
+        for row in rows:
+            tid = row["id"]
+            dep_rows = conn.execute(
+                "SELECT depends_on FROM task_deps WHERE task_id = ?", (tid,)
+            ).fetchall()
+            deps = [d["depends_on"] for d in dep_rows]
+            blocked = False
+            for dep_id in deps:
+                dep_status = conn.execute(
+                    "SELECT status FROM tasks WHERE id = ?", (dep_id,)
+                ).fetchone()
+                if not dep_status or dep_status["status"] != "done":
+                    blocked = True
+                    break
+            if not blocked:
+                task = row
+                break
+        if task is None:
+            conn.rollback()
+            return None
+
+        claim = f"AGENTOS_WORKER_CLAIM={utc_now()}"
+        notes = (task["notes"] or "").rstrip()
+        notes = f"{notes}\n\n{claim}\nWorker auto-pulled pending task.".strip()
+        conn.execute(
+            "UPDATE tasks SET status='in_progress', notes=?, updated_at=? WHERE id=?",
+            (notes, utc_now(), task["id"]),
+        )
+        conn.commit()
+        log(f"auto-pulled {task['id']}: {task['title']}")
+        return dict(task)
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
 def claim_next() -> dict[str, object] | None:
     conn = connect()
     try:
         conn.execute("BEGIN IMMEDIATE")
         rows = conn.execute(
-            """SELECT * FROM tasks
+            f"""SELECT * FROM tasks
                WHERE status = 'in_progress'
-               ORDER BY CASE priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END,
-                        COALESCE(updated_at, created_at) ASC"""
+               {_fetch_order_clause()}"""
         ).fetchall()
         task = None
         for row in rows:
@@ -115,7 +168,8 @@ def claim_next() -> dict[str, object] | None:
                 break
         if task is None:
             conn.rollback()
-            return None
+            # No unclaimed in_progress tasks — try to auto-pull from pending
+            return _auto_pull_pending()
 
         claim = f"AGENTOS_WORKER_CLAIM={utc_now()}"
         notes = (task["notes"] or "").rstrip()
@@ -237,13 +291,21 @@ def main() -> int:
             log("another worker already running; exiting")
             return 0
 
-        log(f"worker started; polling {BOARD_DB} every {POLL_SECONDS}s")
-        while True:
-            task = claim_next()
-            if task:
-                run_task(task)
-            else:
-                time.sleep(POLL_SECONDS)
+        PID_PATH.write_text(str(os.getpid()), encoding="utf-8")
+        try:
+            log(f"worker started; polling {BOARD_DB} every {POLL_SECONDS}s")
+            while True:
+                task = claim_next()
+                if task:
+                    run_task(task)
+                else:
+                    time.sleep(POLL_SECONDS)
+        finally:
+            try:
+                if PID_PATH.exists() and PID_PATH.read_text(encoding="utf-8").strip() == str(os.getpid()):
+                    PID_PATH.unlink()
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":

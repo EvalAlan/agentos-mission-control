@@ -7,6 +7,7 @@ import json
 import mimetypes
 import os
 import re
+import signal
 import sqlite3
 import subprocess
 import time
@@ -27,6 +28,10 @@ DB_STATE = os.path.join(HERMES_HOME, "state.db")
 DB_KANBAN = os.path.join(HERMES_HOME, "kanban.db")
 GATEWAY_JSON = os.path.join(HERMES_HOME, "gateway_state.json")
 BOARD_DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "board.db")
+WORKER_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", "agentos_task_worker.py")
+WORKER_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agentos-task-worker.log")
+WORKER_LOCK = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".agentos-task-worker.lock")
+WORKER_PID = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".agentos-task-worker.pid")
 SYDNEY_AVATAR = os.path.expanduser("~/workspace/avatars/sydney.jpg")
 
 
@@ -41,6 +46,14 @@ def init_board_db():
         created_at TEXT NOT NULL,
         updated_at TEXT
     )""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS task_deps (
+        task_id TEXT NOT NULL,
+        depends_on TEXT NOT NULL,
+        PRIMARY KEY (task_id, depends_on),
+        FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+        FOREIGN KEY (depends_on) REFERENCES tasks(id) ON DELETE CASCADE
+    )""")
+    conn.execute("PRAGMA foreign_keys = ON")
     count = conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0]
     if count == 0:
         now = datetime.now(timezone.utc).isoformat()
@@ -67,6 +80,139 @@ def safe_read_db(db_path):
         return conn
     except Exception:
         return None
+
+
+def _pid_is_running(pid):
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except Exception:
+        return False
+
+
+def _worker_processes():
+    try:
+        out = subprocess.run(
+            ["ps", "-eo", "pid=,args="],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+            check=False,
+        ).stdout or ""
+    except Exception:
+        return []
+    procs = []
+    for line in out.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split(None, 1)
+        if len(parts) != 2:
+            continue
+        pid_text, args = parts
+        if WORKER_SCRIPT not in args:
+            continue
+        try:
+            pid = int(pid_text)
+        except ValueError:
+            continue
+        procs.append({"pid": pid, "args": args})
+    return procs
+
+
+def worker_status():
+    pid = None
+    pid_source = None
+    running = False
+    stale_pid_file = False
+    if os.path.isfile(WORKER_PID):
+        try:
+            pid = int(Path(WORKER_PID).read_text(encoding="utf-8").strip())
+            pid_source = "pidfile"
+            running = _pid_is_running(pid)
+            stale_pid_file = not running
+        except Exception:
+            pid = None
+    processes = _worker_processes()
+    if processes:
+        running = True
+        pid = processes[0]["pid"]
+        pid_source = pid_source or "ps"
+    elif stale_pid_file:
+        try:
+            os.remove(WORKER_PID)
+        except Exception:
+            pass
+    last_log_at = None
+    if os.path.isfile(WORKER_LOG):
+        try:
+            last_log_at = os.path.getmtime(WORKER_LOG)
+        except Exception:
+            last_log_at = None
+    return {
+        "running": running,
+        "pid": pid,
+        "pid_source": pid_source,
+        "process_count": len(processes),
+        "lock_exists": os.path.exists(WORKER_LOCK),
+        "pid_file_exists": os.path.exists(WORKER_PID),
+        "log_path": WORKER_LOG,
+        "last_log_at": last_log_at,
+        "script": WORKER_SCRIPT,
+    }
+
+
+def start_worker():
+    status = worker_status()
+    if status["running"]:
+        return {"ok": True, "already_running": True, "status": status}
+    os.makedirs(os.path.dirname(WORKER_LOG), exist_ok=True)
+    with open(WORKER_LOG, "ab") as logf:
+        proc = subprocess.Popen(
+            ["python3", WORKER_SCRIPT],
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+            stdout=logf,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+    time.sleep(0.4)
+    status = worker_status()
+    return {"ok": status["running"], "pid": proc.pid, "status": status}
+
+
+def stop_worker():
+    status = worker_status()
+    pids = []
+    if status.get("pid"):
+        pids.append(int(status["pid"]))
+    for proc in _worker_processes():
+        if proc["pid"] not in pids:
+            pids.append(proc["pid"])
+    if not pids:
+        return {"ok": True, "already_stopped": True, "status": worker_status()}
+    for pid in pids:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+    deadline = time.time() + 3
+    while time.time() < deadline:
+        if not any(_pid_is_running(pid) for pid in pids):
+            break
+        time.sleep(0.2)
+    survivors = [pid for pid in pids if _pid_is_running(pid)]
+    for pid in survivors:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    try:
+        if os.path.isfile(WORKER_PID):
+            os.remove(WORKER_PID)
+    except Exception:
+        pass
+    return {"ok": True, "stopped_pids": pids, "status": worker_status()}
 
 
 def gateway_data():
@@ -224,9 +370,14 @@ def sessions_data(days=None):
                 recent = []
 
             model_breakdown = {}
+            model_tokens = {}
             if "model" in cols:
-                for row in conn.execute("SELECT model, COUNT(*) FROM sessions GROUP BY model ORDER BY COUNT(*) DESC").fetchall():
+                for row in conn.execute("SELECT model, COUNT(*), SUM(input_tokens), SUM(output_tokens) FROM sessions GROUP BY model ORDER BY COUNT(*) DESC").fetchall():
                     model_breakdown[row[0] or "unknown"] = row[1]
+                    model_tokens[row[0] or "unknown"] = {
+                        "input": row[2] or 0,
+                        "output": row[3] or 0,
+                    }
 
         if "messages" in tables:
             messages = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
@@ -237,7 +388,7 @@ def sessions_data(days=None):
                 tokens = {"input": row[0] or 0, "output": row[1] or 0, "cache": row[2] or 0}
 
         conn.close()
-        return {"count": count, "messages": messages, "tokens": tokens, "recent": recent, "model_breakdown": model_breakdown}
+        return {"count": count, "messages": messages, "tokens": tokens, "recent": recent, "model_breakdown": model_breakdown, "model_tokens": model_tokens}
     except Exception:
         conn.close()
         return {"count": 0, "messages": 0, "tokens": {"input": 0, "output": 0, "cache": 0}, "recent": [], "model_breakdown": {}}
@@ -612,9 +763,20 @@ def _board_tasks():
     if not conn:
         return []
     try:
-        return [dict(r) for r in conn.execute(
+        tasks = [dict(r) for r in conn.execute(
             "SELECT id, title, status, priority, notes, created_at, updated_at FROM tasks ORDER BY COALESCE(updated_at, created_at) DESC"
         ).fetchall()]
+        dep_map = {}
+        for r in conn.execute("SELECT task_id, depends_on FROM task_deps").fetchall():
+            dep_map.setdefault(r["task_id"], []).append(r["depends_on"])
+        for t in tasks:
+            t["depends_on"] = dep_map.get(t["id"], [])
+            t["blocked"] = any(
+                dep_id not in {tt["id"]: tt["status"] for tt in tasks} or
+                {tt["id"]: tt["status"] for tt in tasks}[dep_id] != "done"
+                for dep_id in t["depends_on"]
+            )
+        return tasks
     except Exception:
         return []
     finally:
@@ -717,7 +879,7 @@ def workspace_data():
                 LIMIT 400
             """).fetchall()]
         except Exception:
-            sessions = []
+            return {"count": 0, "messages": 0, "tokens": {"input": 0, "output": 0, "cache": 0}, "recent": [], "model_breakdown": {}, "model_tokens": {}}
         finally:
             conn.close()
 
@@ -788,6 +950,7 @@ def get_snapshot(days=None):
         "sessions": sessions_data(days=days),
         "workspaces": workspace_data(),
         "vps": vps_health(),
+        "worker": worker_status(),
         "crons": cron_jobs(),
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
@@ -909,6 +1072,32 @@ class DashboardHandler(BaseHTTPRequestHandler):
             _serve_content_asset(self, requested, src)
             return
 
+        elif path == "/api/board/summary":
+            tasks = _board_tasks()
+            pending = [t for t in tasks if t["status"] == "pending"]
+            in_progress = [t for t in tasks if t["status"] == "in_progress"]
+            done = [t for t in tasks if t["status"] == "done"]
+            blocked = [t for t in tasks if t.get("blocked")]
+            self.send_json({
+                "total": len(tasks),
+                "pending": len(pending),
+                "in_progress": len(in_progress),
+                "done": len(done),
+                "blocked": len(blocked),
+                "tasks": [
+                    {"id": t["id"], "title": t["title"], "status": t["status"],
+                     "priority": t["priority"], "blocked": t.get("blocked", False),
+                     "depends_on": t.get("depends_on", [])}
+                    for t in tasks
+                ],
+            })
+
+        elif path == "/api/worker/status":
+            self.send_json(worker_status())
+
+        elif path == "/api/cron/jobs":
+            self.send_json({"jobs": hermes_cron_jobs()})
+
         else:
             self.send_error(404)
 
@@ -988,6 +1177,87 @@ class DashboardHandler(BaseHTTPRequestHandler):
             os.makedirs(os.path.dirname(candidate), exist_ok=True)
             with open(candidate, "w", encoding="utf-8") as f:
                 f.write(content)
+            self.send_json({"ok": True})
+
+        elif path == "/api/board/deps/add":
+            task_id = body.get("task_id", "")
+            depends_on = body.get("depends_on", "")
+            if not task_id or not depends_on:
+                self.send_json({"error": "Missing task_id or depends_on"}, 400)
+                return
+            conn = sqlite3.connect(BOARD_DB)
+            try:
+                conn.execute("INSERT OR IGNORE INTO task_deps (task_id, depends_on) VALUES (?, ?)", (task_id, depends_on))
+                conn.commit()
+            except Exception as e:
+                conn.close()
+                self.send_json({"error": str(e)}, 500)
+                return
+            conn.close()
+            self.send_json({"ok": True})
+
+        elif path == "/api/board/deps/remove":
+            task_id = body.get("task_id", "")
+            depends_on = body.get("depends_on", "")
+            if not task_id or not depends_on:
+                self.send_json({"error": "Missing task_id or depends_on"}, 400)
+                return
+            conn = sqlite3.connect(BOARD_DB)
+            conn.execute("DELETE FROM task_deps WHERE task_id = ? AND depends_on = ?", (task_id, depends_on))
+            conn.commit()
+            conn.close()
+            self.send_json({"ok": True})
+
+        elif path == "/api/worker/start":
+            self.send_json(start_worker())
+
+        elif path == "/api/worker/stop":
+            self.send_json(stop_worker())
+
+        elif path == "/api/worker/toggle":
+            self.send_json(stop_worker() if worker_status().get("running") else start_worker())
+
+        elif path == "/api/cron/remove":
+            job_id = body.get("id", "")
+            if not job_id:
+                self.send_json({"error": "Missing job id"}, 400)
+                return
+            jobs_file = os.path.join(HERMES_HOME, "cron", "jobs.json")
+            if not os.path.isfile(jobs_file):
+                self.send_json({"error": "No cron jobs file"}, 404)
+                return
+            try:
+                with open(jobs_file) as f:
+                    data = json.load(f)
+            except Exception:
+                self.send_json({"error": "Cannot read jobs.json"}, 500)
+                return
+            data["jobs"] = [j for j in data.get("jobs", []) if j.get("id") != job_id]
+            with open(jobs_file, "w") as f:
+                json.dump(data, f, indent=2)
+            self.send_json({"ok": True})
+
+        elif path == "/api/cron/toggle":
+            job_id = body.get("id", "")
+            if not job_id:
+                self.send_json({"error": "Missing job id"}, 400)
+                return
+            jobs_file = os.path.join(HERMES_HOME, "cron", "jobs.json")
+            if not os.path.isfile(jobs_file):
+                self.send_json({"error": "No cron jobs file"}, 404)
+                return
+            try:
+                with open(jobs_file) as f:
+                    data = json.load(f)
+            except Exception:
+                self.send_json({"error": "Cannot read jobs.json"}, 500)
+                return
+            for job in data.get("jobs", []):
+                if job.get("id") == job_id:
+                    job["enabled"] = not job.get("enabled", True)
+                    break
+            with open(jobs_file, "w") as f:
+                json.dump(data, f, indent=2)
             self.send_json({"ok": True})
 
         else:

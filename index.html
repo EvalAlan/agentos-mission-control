@@ -1548,18 +1548,47 @@ function renderLogTable(entries, filter) {
 // TASKS TAB
 // ══════════════════════════════════════════════════════════════
 let boardData = [];
+let workerState = { running: false };
+let workerActionPending = false;
 async function loadTasks() {
   try {
-    const res = await fetch('api/board');
-    boardData = await res.json();
-  } catch(e) { boardData = []; }
+    const [boardRes, workerRes] = await Promise.all([
+      fetch('api/board'),
+      fetch('api/worker/status'),
+    ]);
+    boardData = await boardRes.json();
+    workerState = await workerRes.json();
+  } catch(e) {
+    boardData = [];
+    workerState = { running: false, error: String(e) };
+  }
   renderTaskBoard();
+}
+
+function renderWorkerControls() {
+  const running = !!workerState.running;
+  const statusColor = running ? 'var(--status-active)' : 'var(--brand-amber)';
+  const statusLabel = running ? 'Automation Running' : 'Automation Stopped';
+  const detail = workerState.pid ? `PID ${workerState.pid}` : (workerState.lock_exists ? 'lock present' : 'idle');
+  const btnLabel = workerActionPending ? 'Working…' : (running ? 'Stop Automation' : 'Start Automation');
+  const btnClass = running ? 'btn-secondary' : 'btn-primary';
+  return `
+    <div class="glass-card glow-cyan" style="padding:var(--space-3);margin-bottom:var(--space-3);">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:var(--space-3);flex-wrap:wrap;">
+        <div>
+          <div class="section-eyebrow">TASK AUTOMATION</div>
+          <div style="font:600 var(--font-size-sm) var(--font-mono);color:${statusColor};margin-top:4px;">${statusLabel}</div>
+          <div style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);margin-top:2px;">Worker polls in_progress tasks and auto-runs them. ${detail}</div>
+        </div>
+        <button class="${btnClass}" onclick="toggleWorker()" ${workerActionPending ? 'disabled' : ''}>${btnLabel}</button>
+      </div>
+    </div>`;
 }
 
 function renderTaskBoard() {
   const cols = ['pending', 'in_progress', 'done'];
   const labels = ['Pending', 'In Progress', 'Done'];
-  document.getElementById('taskBoard').innerHTML = cols.map((col, i) => {
+  document.getElementById('taskBoard').innerHTML = renderWorkerControls() + cols.map((col, i) => {
     const tasks = boardData.filter(t => t.status === col);
     const addBtn = col === 'pending' ? `<button class="btn-secondary" style="font-size:11px;padding:3px 10px;" onclick="showAddTask()">+ Add</button>` : '';
     const cards = tasks.map((t, ti) => `
@@ -1617,6 +1646,18 @@ window.moveTask = async function(id, newStatus) {
 window.deleteTask = async function(id) {
   await fetch('api/board/delete?id=' + id, { method: 'POST' });
   loadTasks();
+};
+
+window.toggleWorker = async function() {
+  if (workerActionPending) return;
+  workerActionPending = true;
+  renderTaskBoard();
+  try {
+    await fetch('api/worker/toggle', { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' });
+  } finally {
+    workerActionPending = false;
+    await loadTasks();
+  }
 };
 
 // ══════════════════════════════════════════════════════════════
