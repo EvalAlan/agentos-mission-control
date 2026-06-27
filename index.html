@@ -1184,6 +1184,7 @@ function renderOverview(d) {
   const activeWorkspaces = workspaces.filter(w => (w.sessions || 0) > 0 || (w.active_tasks || 0) > 0).length;
   const topWorkspace = workspaces[0];
   const latestWorkspace = workspaces.slice().sort((a,b) => (b.last_activity || 0) - (a.last_activity || 0))[0];
+  const latestWorkspaceLabel = latestWorkspace ? (latestWorkspace.activity_label || latestWorkspace.active_task_label || latestWorkspace.name) : '';
 
   const cpuColor = vps.cpu > 85 ? 'var(--brand-red)' : vps.cpu > 70 ? 'var(--brand-amber)' : 'var(--brand-cyan)';
   const ramColor = vps.ram_pct > 85 ? 'var(--brand-red)' : vps.ram_pct > 70 ? 'var(--brand-amber)' : 'var(--brand-cyan)';
@@ -1264,7 +1265,7 @@ function renderOverview(d) {
       <div class="ops-column">
         <div class="ops-label">FOCUS</div>
         <div style="font:500 var(--font-size-sm) var(--font-mono);color:var(--brand-cyan);margin-bottom:var(--space-3);text-shadow:0 0 20px rgba(125,211,252,0.3);">
-          ${latestWorkspace ? `${latestWorkspace.name} · ${relativeUnix(latestWorkspace.last_activity)}` : 'No workspace activity yet'}
+          ${latestWorkspace ? `${latestWorkspaceLabel} · ${relativeUnix(latestWorkspace.last_activity)}` : 'No workspace activity yet'}
         </div>
         <div class="ops-label" style="margin-top:var(--space-2);">WORKSPACE LOAD</div>
         ${workspaceBars || '<div class="empty-state">No workspaces configured</div>'}
@@ -1342,7 +1343,8 @@ function renderAgents(d) {
     const branch = repo.branch || '—';
     const language = repo.language || 'repo';
     const activeTasks = w.active_tasks || 0;
-    const activeTaskTitle = (w.active_task_titles && w.active_task_titles[0]) || '';
+    const activeTaskTitle = (w.active_task_label || (w.active_task_titles && w.active_task_titles[0]) || '');
+    const latestDisplayTitle = (w.activity_label || activeTaskTitle || latest.title || '').trim();
 
     return `<div class="agent-card dissolve-in" style="--agent-color:${color};${staggerDelay(idx)}">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-2);">
@@ -1365,7 +1367,7 @@ function renderAgents(d) {
         <span>${language}</span><span>${lastLabel}</span>
       </div>
       ${activeTaskTitle ? `<div style="margin-top:var(--space-2);font:500 var(--font-size-xs) var(--font-mono);color:var(--brand-cyan);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${activeTaskTitle}">▶ ${activeTaskTitle}</div>` : ''}
-      ${latest.title ? `<div style="margin-top:4px;font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${latest.title}">↳ ${latest.title}</div>` : ''}
+      ${latestDisplayTitle ? `<div style="margin-top:4px;font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${latestDisplayTitle}">↳ ${latestDisplayTitle}</div>` : ''}
       ${repo.last_commit ? `<div style="margin-top:4px;font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${repo.last_commit}">git ${repo.last_commit}</div>` : ''}
     </div>`;
   }).join('');
@@ -1933,6 +1935,8 @@ function overviewSignature(d) {
   const workspaces = (d.workspaces || []).map(w => ({
     key: w.key,
     sessions: w.sessions || 0,
+    active_tasks: w.active_tasks || 0,
+    activity_label: w.activity_label || '',
     messages: w.messages || 0,
     tools: w.tools || 0,
     last_activity: w.last_activity || 0,
@@ -1961,6 +1965,9 @@ function workspacesSignature(d) {
     discord: w.discord,
     description: w.description,
     sessions: w.sessions || 0,
+    active_tasks: w.active_tasks || 0,
+    active_task_label: w.active_task_label || '',
+    activity_label: w.activity_label || '',
     messages: w.messages || 0,
     tools: w.tools || 0,
     last_activity: w.last_activity || 0,

@@ -632,6 +632,11 @@ def _serve_content_asset(handler, requested, src):
     handler._serve_static(asset_path, mime or "application/octet-stream")
 
 
+def _looks_like_session_id(value):
+    text = str(value or "").strip()
+    return bool(re.fullmatch(r"\d{8}_\d{6}_[0-9a-f]+", text))
+
+
 def workspace_data():
     config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "workspaces.json")
     try:
@@ -668,6 +673,13 @@ def workspace_data():
         active_tasks = [t for t in tasks if (t.get("status") == "in_progress") and _task_matches_workspace(t, terms, repo_path)]
         latest = matched[0] if matched else None
         repo = _repo_info(repo_path)
+        active_task_titles = [str(t.get("title") or "").strip() for t in active_tasks if str(t.get("title") or "").strip()]
+        active_task_label = f"{ws.get('name')}: {active_task_titles[0]}" if active_task_titles else ""
+        latest_title = str((latest or {}).get("title") or "").strip()
+        latest_display_title = latest_title
+        if _looks_like_session_id(latest_title) and active_task_label:
+            latest_display_title = active_task_label
+        activity_label = active_task_label or latest_display_title or ws.get("name") or ws.get("key") or ""
         task_activity = 0.0
         for t in active_tasks:
             stamp = t.get("updated_at") or t.get("created_at")
@@ -686,7 +698,9 @@ def workspace_data():
             "repo_info": repo,
             "sessions": len(matched),
             "active_tasks": len(active_tasks),
-            "active_task_titles": [str(t.get("title") or "") for t in active_tasks],
+            "active_task_titles": active_task_titles,
+            "active_task_label": active_task_label,
+            "activity_label": activity_label,
             "messages": sum(int(s.get("message_count") or 0) for s in matched),
             "tools": sum(int(s.get("tool_call_count") or 0) for s in matched),
             "tokens": {
