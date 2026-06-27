@@ -608,6 +608,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass  # Suppress default logging
 
+    def _normalize_path(self, path: str) -> str:
+        if path == "/agentos":
+            return "/"
+        if path.startswith("/agentos/"):
+            stripped = path[len("/agentos"):]
+            return stripped or "/"
+        return path
+
     def send_json(self, data, status=200):
         body = json.dumps(data, default=str).encode()
         self.send_response(status)
@@ -637,7 +645,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urlparse(self.path)
-        path = parsed.path
+        path = self._normalize_path(parsed.path)
         params = parse_qs(parsed.query)
 
         if path == "/":
@@ -751,7 +759,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urlparse(self.path)
-        path = parsed.path
+        path = self._normalize_path(parsed.path)
         content_length = int(self.headers.get("Content-Length", 0))
         body = json.loads(self.rfile.read(content_length)) if content_length > 0 else {}
 
