@@ -511,6 +511,7 @@
     .glow-violet { box-shadow: 0 0 30px rgba(139,92,246,0.15); }
     .glow-cyan { box-shadow: 0 0 30px rgba(125,211,252,0.15); }
     .glow-mint { box-shadow: 0 0 30px rgba(94,226,181,0.15); }
+    .glow-gold { box-shadow: 0 0 30px rgba(251,191,36,0.15); }
 
     /* ── Scan Line Effect ── */
     .scan-line {
@@ -1073,6 +1074,8 @@ function renderOverview(d) {
   const ramColor = vps.ram_pct > 85 ? 'var(--brand-red)' : vps.ram_pct > 70 ? 'var(--brand-amber)' : 'var(--brand-cyan)';
   const diskColor = vps.disk_pct > 85 ? 'var(--brand-red)' : vps.disk_pct > 70 ? 'var(--brand-amber)' : 'var(--brand-cyan)';
   const uptime = gw.uptime || 'N/A';
+  const startEpoch = gw.start_time ? Number(gw.start_time) : null;
+  const uptimeStr = startEpoch ? humanUptime(startEpoch) : (gw.uptime || 'N/A');
 
   const maxSessions = Math.max(...workspaces.map(w => w.sessions || 0), 1);
   const radarDots = workspaces.map((w, i) => {
@@ -1161,7 +1164,7 @@ function renderOverview(d) {
           <div><div style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);">DISK ${vps.disk_pct || 0}%</div>${ProgressBar({ pct: vps.disk_pct || 0, color: diskColor })}</div>
         </div>
         <div class="ops-label">TAILNET SERVE</div>
-        <div style="font:500 var(--font-size-sm) var(--font-mono);color:var(--brand-gold);text-shadow:0 0 15px rgba(251,191,36,0.3);">/agentos/ · ${uptime}</div>
+        <div style="font:500 var(--font-size-sm) var(--font-mono);color:var(--brand-gold);text-shadow:0 0 15px rgba(251,191,36,0.3);">/agentos/ · ${uptimeStr}</div>
       </div>
     </div>
     <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:var(--space-3);margin-top:var(--space-4);">
@@ -1190,7 +1193,16 @@ function renderOverview(d) {
       <div class="section-eyebrow">RECENT HERMES SESSIONS</div>
       <div style="max-height:260px;overflow-y:auto;margin-top:var(--space-2);">${recentSessions || '<div class="empty-state">No recent sessions</div>'}</div>
     </div>
+    <div class="glass-card glow-gold" style="padding:var(--space-4);">
+      <div class="section-eyebrow">MODELS USED</div>
+      ${(sessions.recent || []).length ? renderModelDonut((sessions.recent || []).slice(0, 25)) : '<div class="empty-state">No session data yet</div>'}
+    </div>
   `;
+
+  requestAnimationFrame(() => {
+    const mc = document.getElementById('modelDonutCanvas');
+    if (mc) drawDonut(mc);
+  });
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1306,6 +1318,71 @@ function relativeUnix(ts) {
   if (diff < 3600) return `${Math.floor(diff/60)}m ago`;
   if (diff < 86400) return `${Math.floor(diff/3600)}h ago`;
   return `${Math.floor(diff/86400)}d ago`;
+}
+
+function humanUptime(startTimestamp) {
+  const now = Math.floor(Date.now() / 1000);
+  const elapsed = Math.max(0, now - Number(startTimestamp));
+  if (elapsed < 60) return `${elapsed}s`;
+  if (elapsed < 3600) return `${Math.floor(elapsed / 60)}m`;
+  if (elapsed < 86400) return `${Math.floor(elapsed / 3600)}h ${Math.floor((elapsed % 3600) / 60)}m`;
+  const days = Math.floor(elapsed / 86400);
+  const hours = Math.floor((elapsed % 86400) / 3600);
+  return `${days}d ${hours}h`;
+}
+
+const MODEL_PALETTE = {
+  'claude-sonnet-4': 'var(--brand-violet)',
+  'gpt-5.5': 'var(--brand-cyan)',
+  'gpt-4o': 'var(--brand-gold)',
+  'gpt-4o-mini': 'var(--brand-magenta)',
+  'owl-alpha': 'var(--brand-teal)',
+  'default': 'var(--status-active)',
+};
+
+function modelColor(model) {
+  return MODEL_PALETTE[model] || MODEL_PALETTE['default'];
+}
+
+function renderModelDonut(sessions) {
+  if (!sessions || !sessions.length) {
+    return `<div style="display:flex;justify-content:center;align-items:center;padding:var(--space-3);">
+      <canvas id="modelDonutCanvas" width="160" height="160" style="width:160px;height:160px;"></canvas>
+    </div>
+    <div id="modelDonutLegend" style="margin-top:var(--space-2);"></div>`;
+  }
+
+  const counts = {};
+  for (const s of sessions) {
+    const m = s.model || 'unknown';
+    counts[m] = (counts[m] || 0) + 1;
+  }
+
+  const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  const total = sessions.length;
+  const slices = entries.map(([model, count]) => ({
+    model,
+    count,
+    color: modelColor(model),
+    pct: Math.round((count / total) * 100),
+  }));
+
+  const legendHtml = slices.map(s =>
+    `<div style="display:flex;align-items:center;justify-content:space-between;padding:2px 0;">
+      <div style="display:flex;align-items:center;gap:var(--space-2);">
+        <div style="width:8px;height:8px;border-radius:50%;background:${s.color};box-shadow:0 0 8px ${s.color};"></div>
+        <span style="font:500 var(--font-size-xs) var(--font-mono);color:var(--text-primary);">${s.model}</span>
+      </div>
+      <span style="font:500 var(--font-size-xs) var(--font-mono);color:var(--brand-cyan);">${s.count} (${s.pct}%)</span>
+    </div>`
+  ).join('');
+
+  const canvasSlices = JSON.stringify(slices);
+
+  return `<div style="display:flex;justify-content:center;align-items:center;padding:var(--space-3);">
+    <canvas id="modelDonutCanvas" width="160" height="160" style="width:160px;height:160px;" data-slices='${canvasSlices}'></canvas>
+  </div>
+  <div style="margin-top:var(--space-2);">${legendHtml}</div>`;
 }
 
 function renderWorkspaceTable(workspaces, filter) {
