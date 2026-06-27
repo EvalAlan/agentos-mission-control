@@ -163,8 +163,8 @@
     .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-3); }
     .grid-ops { display: grid; grid-template-columns: 180px 1fr 1fr; gap: var(--space-5); }
     .grid-tasks { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-4); }
-    .workspace-lane-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: var(--space-3); }
-    .repo-board-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: var(--space-2); }
+    .workspace-lane-grid { display: grid; gap: var(--space-3); }
+    .repo-board-grid { display: grid; gap: var(--space-2); }
 
     .ops-column { display: flex; flex-direction: column; gap: var(--space-3); }
     .ops-label {
@@ -1144,6 +1144,15 @@ function staggerDelay(index) {
   return `animation-delay: ${index * 80}ms;`;
 }
 
+function balancedGridColumns(count, { max = 4, mobile = 1 } = {}) {
+  const total = Math.max(0, Number(count) || 0);
+  if (MOBILE_MODE) return mobile;
+  if (total <= 1) return Math.max(1, total);
+  if (total <= 3) return total;
+  if (total <= 9) return Math.ceil(Math.sqrt(total));
+  return Math.min(max, Math.ceil(total / 3));
+}
+
 const CONTENT_COLORS = ['var(--brand-violet)', 'var(--brand-cyan)', 'var(--brand-gold)', 'var(--brand-magenta)', 'var(--brand-teal)', 'var(--status-active)'];
 function hashString(value) {
   let hash = 0;
@@ -1163,6 +1172,7 @@ function renderOverview(d) {
   const sessions = d.sessions || {};
   const gw = d.gateway || {};
   const workspaces = (d.workspaces || []).slice().sort((a,b) => (b.sessions||0) - (a.sessions||0));
+  const repoBoardCols = balancedGridColumns(workspaces.length, { max: 4, mobile: 1 });
   const palette = ['var(--brand-violet)','var(--brand-cyan)','var(--brand-gold)','var(--brand-magenta)','var(--brand-teal)','var(--status-active)'];
 
   const totalWorkspaceSessions = workspaces.reduce((sum, w) => sum + (w.sessions || 0), 0);
@@ -1289,7 +1299,7 @@ function renderOverview(d) {
   document.getElementById('overviewBottom').innerHTML = `
     <div class="glass-card glow-violet" style="padding:var(--space-4);">
       <div class="section-eyebrow">REPO BOARD</div>
-      <div class="repo-board-grid" style="margin-top:var(--space-3);">${repoGrid}</div>
+      <div class="repo-board-grid" style="margin-top:var(--space-3);grid-template-columns:repeat(${repoBoardCols}, minmax(0, 1fr));">${repoGrid}</div>
     </div>
     <div class="glass-card glow-cyan" style="padding:var(--space-4);">
       <div class="section-eyebrow">RECENT HERMES SESSIONS</div>
@@ -1304,6 +1314,7 @@ function renderOverview(d) {
 function renderAgents(d) {
   if (!d) return;
   const workspaces = (d.workspaces || []).slice().sort((a,b) => ((b.sessions||0) + (b.active_tasks||0)) - ((a.sessions||0) + (a.active_tasks||0)));
+  const laneCols = balancedGridColumns(workspaces.length, { max: 4, mobile: 1 });
   const totalSessions = Math.max(workspaces.reduce((sum, w) => sum + (w.sessions || 0), 0), 1);
   const totalActiveTasks = workspaces.reduce((sum, w) => sum + (w.active_tasks || 0), 0);
   const active = workspaces.filter(w => (w.sessions || 0) > 0 || (w.active_tasks || 0) > 0).length;
@@ -1319,6 +1330,7 @@ function renderAgents(d) {
   });
 
   const palette = ['var(--brand-violet)','var(--brand-cyan)','var(--brand-gold)','var(--brand-magenta)','var(--brand-teal)','var(--status-active)','var(--brand-amber)'];
+  document.getElementById('agentCards').style.gridTemplateColumns = `repeat(${laneCols}, minmax(0, 1fr))`;
   document.getElementById('agentCards').innerHTML = workspaces.map((w, idx) => {
     const color = palette[idx % palette.length];
     const repo = w.repo_info || {};
@@ -1995,6 +2007,12 @@ function renderScheduleIfChanged(d, force = false) {
     renderSchedule(d);
   }
 }
+
+window.addEventListener('resize', () => {
+  if (!lastSnapshot || MOBILE_MODE) return;
+  if (currentTab === 'overview') renderOverviewIfChanged(lastSnapshot, true);
+  if (currentTab === 'agents') renderWorkspacesIfChanged(lastSnapshot, true);
+});
 
 async function fetchSnapshot() {
   try {
