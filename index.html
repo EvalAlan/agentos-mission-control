@@ -1291,7 +1291,17 @@ function renderOverview(d) {
           <div><div style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);">DISK ${vps.disk_pct || 0}%</div>${ProgressBar({ pct: vps.disk_pct || 0, color: diskColor })}</div>
         </div>
         <div class="ops-label">TAILNET SERVE</div>
-        <div style="font:500 var(--font-size-sm) var(--font-mono);color:var(--brand-gold);text-shadow:0 0 15px rgba(251,191,36,0.3);">/agentos/ · ${uptime}</div>
+        <div style="font:500 var(--font-size-sm) var(--font-mono);color:var(--brand-gold);text-shadow:0 0 15px rgba(251,191,36,0.3);">
+          <span style="color:var(--brand-cyan);">docker01.tailfd29f7.ts.net</span> · ${uptime}
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px;margin-top:8px;">
+          <a href="https://docker01.tailfd29f7.ts.net/" target="_blank" rel="noopener" style="font:500 var(--font-size-xs) var(--font-mono);color:var(--brand-cyan);text-decoration:none;display:flex;align-items:center;gap:6px;" onmouseover="this.style.color='var(--text-primary)'" onmouseout="this.style.color='var(--brand-cyan)'">
+            <span style="color:var(--status-active);">●</span> AgentOS Dashboard
+          </a>
+          <a href="https://docker01.tailfd29f7.ts.net:8420/" target="_blank" rel="noopener" style="font:500 var(--font-size-xs) var(--font-mono);color:var(--brand-cyan);text-decoration:none;display:flex;align-items:center;gap:6px;" onmouseover="this.style.color='var(--text-primary)'" onmouseout="this.style.color='var(--brand-cyan)'">
+            <span style="color:var(--brand-gold);">●</span> SearXNG Search
+          </a>
+        </div>
       </div>
     </div>
     <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:var(--space-3);margin-top:var(--space-4);">
