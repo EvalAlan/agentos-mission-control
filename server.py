@@ -52,6 +52,7 @@ def init_board_db():
         status TEXT DEFAULT 'pending',
         priority TEXT DEFAULT 'medium',
         notes TEXT DEFAULT '',
+        pr_url TEXT DEFAULT '',
         created_at TEXT NOT NULL,
         updated_at TEXT
     )""")
@@ -1099,7 +1100,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 "tasks": [
                     {"id": t["id"], "title": t["title"], "status": t["status"],
                      "priority": t["priority"], "blocked": t.get("blocked", False),
-                     "depends_on": t.get("depends_on", [])}
+                     "depends_on": t.get("depends_on", []), "pr_url": t.get("pr_url", "")}
                     for t in tasks
                 ],
             })
@@ -1126,12 +1127,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 "status": normalize_board_status(body.get("status", "pending")),
                 "priority": body.get("priority", "medium"),
                 "notes": body.get("notes", ""),
+                "pr_url": body.get("pr_url", ""),
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 "updated_at": None,
             }
             conn = sqlite3.connect(BOARD_DB)
-            conn.execute("INSERT INTO tasks (id, title, status, priority, notes, created_at) VALUES (?,?,?,?,?,?)",
-                (task["id"], task["title"], task["status"], task["priority"], task["notes"], task["created_at"]))
+            conn.execute("INSERT INTO tasks (id, title, status, priority, notes, pr_url, created_at) VALUES (?,?,?,?,?,?,?)",
+                (task["id"], task["title"], task["status"], task["priority"], task["notes"], task["pr_url"], task["created_at"]))
             conn.commit()
             conn.close()
             self.send_json(task, 201)
@@ -1144,7 +1146,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             conn = sqlite3.connect(BOARD_DB)
             fields = []
             values = []
-            for key in ("title", "status", "priority", "notes"):
+            for key in ("title", "status", "priority", "notes", "pr_url"):
                 if key in body:
                     fields.append(f"{key} = ?")
                     if key == "status":
@@ -1160,10 +1162,23 @@ class DashboardHandler(BaseHTTPRequestHandler):
             conn.close()
             self.send_json({"ok": True})
 
+        elif path == "/api/board/set-pr":
+            task_id = body.get("id", "")
+            pr_url = body.get("pr_url", "")
+            if not task_id:
+                self.send_json({"error": "Missing id"}, 400)
+                return
+            conn = sqlite3.connect(BOARD_DB)
+            conn.execute("UPDATE tasks SET pr_url = ?, updated_at = ? WHERE id = ?",
+                (pr_url, datetime.now(timezone.utc).isoformat(), task_id))
+            conn.commit()
+            conn.close()
+            self.send_json({"ok": True})
+
         elif path == "/api/board/delete":
             task_id = parse_qs(parsed.query).get("id", [""])[0]
             if not task_id:
-                self.send_json({"error": "Missing id"}, 400)
+                self.send_json({"error": "missing id"}, 400)
                 return
             conn = sqlite3.connect(BOARD_DB)
             conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
