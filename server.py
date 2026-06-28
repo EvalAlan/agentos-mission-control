@@ -35,6 +35,15 @@ WORKER_PID = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".agentos-
 SYDNEY_AVATAR = os.path.expanduser("~/workspace/avatars/sydney.jpg")
 
 
+def normalize_board_status(value):
+    status = str(value or "").strip().lower()
+    if status == "done":
+        return "review"
+    if status in {"pending", "in_progress", "review"}:
+        return status
+    return status or "pending"
+
+
 def init_board_db():
     conn = sqlite3.connect(BOARD_DB)
     conn.execute("""CREATE TABLE IF NOT EXISTS tasks (
@@ -64,6 +73,9 @@ def init_board_db():
             ("evilsdr-work", "evilSDR/Skywarn backlog", "pending", "medium", "SDR tooling, scan hits, GUI polish", now),
         ]
         conn.executemany("INSERT INTO tasks (id, title, status, priority, notes, created_at) VALUES (?,?,?,?,?,?)", seeds)
+    # The board workflow uses review as the post-worker review gate.
+    # Normalize any done rows back into review so automation cannot skip human review.
+    conn.execute("UPDATE tasks SET status = 'review', updated_at = COALESCE(updated_at, created_at) WHERE status = 'done'")
     conn.commit()
     conn.close()
 
@@ -1111,7 +1123,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             task = {
                 "id": str(uuid.uuid4()),
                 "title": body.get("title", ""),
-                "status": body.get("status", "pending"),
+                "status": normalize_board_status(body.get("status", "pending")),
                 "priority": body.get("priority", "medium"),
                 "notes": body.get("notes", ""),
                 "created_at": datetime.now(timezone.utc).isoformat(),
@@ -1135,7 +1147,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
             for key in ("title", "status", "priority", "notes"):
                 if key in body:
                     fields.append(f"{key} = ?")
-                    values.append(body[key])
+                    if key == "status":
+                        values.append(normalize_board_status(body[key]))
+                    else:
+                        values.append(body[key])
             if fields:
                 fields.append("updated_at = ?")
                 values.append(datetime.now(timezone.utc).isoformat())
