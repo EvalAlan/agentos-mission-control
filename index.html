@@ -1164,14 +1164,16 @@ function balancedGridColumns(count, { max = 4, mobile = 1 } = {}) {
   return Math.min(max, Math.ceil(total / 3));
 }
 
-const CONTENT_COLORS = ['var(--brand-violet)', 'var(--brand-cyan)', 'var(--brand-gold)', 'var(--brand-magenta)', 'var(--brand-teal)', 'var(--status-active)'];
-function hashString(value) {
-  let hash = 0;
-  for (let i = 0; i < value.length; i++) hash = ((hash << 5) - hash) + value.charCodeAt(i);
-  return Math.abs(hash);
-}
+const CONTENT_COLORS = [
+  '#8B5CF6',  // purple
+  '#7DD3FC',  // sky blue
+  '#F26D6D',  // red
+  '#2DD4BF',  // teal
+  '#FBBF24',  // yellow
+  '#FB923C',  // orange
+];
 function contentGroupColor(value) {
-  return CONTENT_COLORS[hashString(String(value || 'content')) % CONTENT_COLORS.length];
+  return contentGroupColors.get(String(value || 'content')) || CONTENT_COLORS[0];
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1711,9 +1713,15 @@ let contentDocs = [];
 let selectedDoc = null;
 let contentExpandedGroups = new Set();
 let contentSidebarInitialized = false;
+let contentGroupColors = new Map();
 
 function contentGroupKey(doc) {
   return doc?.group || 'content';
+}
+
+function rebuildContentGroupColors() {
+  const groups = [...new Set(contentDocs.map(d => contentGroupKey(d)))].sort((a, b) => a.localeCompare(b));
+  contentGroupColors = new Map(groups.map((group, index) => [group, CONTENT_COLORS[index % CONTENT_COLORS.length]]));
 }
 
 function setOnlyContentGroupOpen(group) {
@@ -1746,6 +1754,7 @@ async function loadContentDocs() {
     const res = await fetch('api/content');
     contentDocs = await res.json();
   } catch(e) { contentDocs = []; }
+  rebuildContentGroupColors();
   installContentSidebarHandlers();
 
   if (!contentDocs.length) {
