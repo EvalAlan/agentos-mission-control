@@ -211,6 +211,12 @@
     .worker-log-head { display:flex; justify-content:space-between; gap:var(--space-2); align-items:center; padding:var(--space-2) var(--space-3); border-bottom:1px solid rgba(255,255,255,0.06); background:rgba(255,255,255,0.025); }
     .worker-log-path { font:400 10px var(--font-mono); color:var(--text-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:360px; }
     .worker-log-pre { max-height:176px; overflow:auto; white-space:pre-wrap; font:400 11px/1.45 var(--font-mono); margin:0; padding:var(--space-3); color:rgba(244,244,248,0.86); background:rgba(0,0,0,0.18); }
+    .worker-log-follow { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:var(--radius-full); font:500 10px var(--font-mono); cursor:pointer; border:1px solid transparent; transition:all 0.2s ease; text-transform:uppercase; letter-spacing:var(--letter-spacing-wide); }
+    .worker-log-follow.following { background:rgba(94,226,181,0.12); border-color:rgba(94,226,181,0.3); color:var(--brand-mint); }
+    .worker-log-follow.paused { background:rgba(245,181,68,0.12); border-color:rgba(245,181,68,0.3); color:var(--brand-amber); }
+    .worker-log-follow:hover { filter:brightness(1.15); }
+    .worker-log-follow .follow-dot { width:6px; height:6px; border-radius:50%; background:currentColor; box-shadow:0 0 8px currentColor; animation:pulse 2s ease infinite; }
+    .worker-log-follow.paused .follow-dot { animation:none; opacity:0.6; }
     .task-lane-card { min-height: 136px; }
     .task-lane-card .empty-state { min-height: 62px; display:flex; align-items:center; justify-content:center; }
     .workspace-lane-grid { display: grid; gap: var(--space-3); }
@@ -1385,9 +1391,27 @@ updateClock();
 // ══════════════════════════════════════════════════════════════
 // TAB SWITCHING WITH DISSOLVE
 // ══════════════════════════════════════════════════════════════
+const TAB_NAMES = new Set(['overview', 'agents', 'tasks', 'chat', 'schedule', 'content']);
 let currentTab = 'overview';
+function persistTab(name) {
+  try {
+    localStorage.setItem('agentos-tab', name);
+    if (history && history.replaceState) {
+      history.replaceState(null, '', `${location.pathname}${location.search}#${name}`);
+    } else {
+      location.hash = name;
+    }
+  } catch (e) {}
+}
+function getInitialTab() {
+  const hashTab = (location.hash || '').replace(/^#/, '').trim();
+  if (TAB_NAMES.has(hashTab)) return hashTab;
+  const savedTab = localStorage.getItem('agentos-tab');
+  if (TAB_NAMES.has(savedTab)) return savedTab;
+  return 'overview';
+}
 function switchTab(name) {
-  if (name === currentTab) return;
+  if (!TAB_NAMES.has(name) || name === currentTab) return;
   const oldPanel = document.getElementById('tab-' + currentTab);
   const newPanel = document.getElementById('tab-' + name);
 
@@ -1404,6 +1428,7 @@ function switchTab(name) {
   }
 
   currentTab = name;
+  persistTab(name);
   document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
   document.querySelector(`[data-tab="${name}"]`).classList.add('active');
 
@@ -1880,6 +1905,8 @@ function renderLogTable(entries, filter) {
 let boardData = [];
 let workerState = { running: false };
 let workerLogState = { exists: false, lines: [] };
+let workerLogFollow = true;
+let workerLogPollInterval = null;
 let workerActionPending = false;
 async function loadTasks() {
   try {
@@ -1947,8 +1974,12 @@ function renderWorkerControls() {
           <div class="worker-log-head">
             <div class="section-eyebrow" style="margin-bottom:0;">LOG TAIL</div>
             <span class="worker-log-path" title="${escapeAttr(workerLogState.path || '')}">${escapeHtml(logName)}</span>
+            <button class="worker-log-follow ${workerLogFollow ? 'following' : 'paused'}" onclick="toggleLogFollow()" title="Toggle log auto-follow">
+              <span class="follow-dot"></span>
+              <span>${workerLogFollow ? 'Following' : 'Paused'}</span>
+            </button>
           </div>
-          <pre class="worker-log-pre">${logHtml}</pre>
+          <pre class="worker-log-pre" id="workerLogPre">${logHtml}</pre>
         </div>
       </div>
     </section>`;
@@ -2035,6 +2066,97 @@ function parseTaskNotes(task) {
   return meta;
 }
 
+function parseReviewHistory(task) {
+  const notes = String(task?.notes || '');
+  const history = [];
+
+  const claimMatches = [...notes.matchAll(/AGENTOS_WORKER_CLAIM=([0-9TZ:._+-]+)/gi)];
+  for (const m of claimMatches) {
+    const ts = m[1].replace('Z', '+00:00');
+    const dt = new Date(ts);
+    if (!isNaN(dt.getTime())) {
+      history.push({ type: 'claim', time: dt, text: 'Worker claimed task', raw: m[0] });
+    }
+  }
+
+  const headingMatches = [...notes.matchAll(/WORKER\s+(COMPLETED|FAILED|BLOCKED)([^\n]*)\s+at\s+([0-9TZ:._+-]+):/gi)];
+  for (const h of headingMatches) {
+    const ts = h[3].replace('Z', '+00:00');
+    const dt = new Date(ts);
+    if (!isNaN(dt.getTime())) {
+      const status = h[1].toLowerCase();
+      const label = status === 'completed' ? 'Worker completed' : status === 'failed' ? 'Worker failed' : 'Worker blocked';
+      history.push({ type: 'worker_result', time: dt, text: label, status, raw: h[0].replace(/:$/, '') });
+    }
+  }
+
+  const resetMatches = [...notes.matchAll(/AGENTOS_OPERATOR_RESET=([0-9TZ:._+-]+)/gi)];
+  for (const r of resetMatches) {
+    const ts = r[1].replace('Z', '+00:00');
+    const dt = new Date(ts);
+    if (!isNaN(dt.getTime())) {
+      history.push({ type: 'reset', time: dt, text: 'Operator reset to pending', raw: r[0] });
+    }
+  }
+
+  const statusMatches = [...notes.matchAll(/(?:^|\n)\s*STATUS\s*:\s*([^\n|]+)/gi)];
+  for (const s of statusMatches) {
+    history.push({ type: 'status', time: null, text: `Status: ${s[1].trim()}`, status: s[1].trim().toLowerCase() });
+  }
+
+  history.sort((a, b) => (b.time?.getTime() || 0) - (a.time?.getTime() || 0));
+
+  const summaries = [...notes.matchAll(/WORKER\s+(COMPLETED|FAILED|BLOCKED)([^\n]*)\s+at\s+[0-9TZ:._+-]+:\n([\s\S]*?)(?=\n\n(?:AGENTOS_|WORKER\s+(?:COMPLETED|FAILED|BLOCKED)|$))/gi)];
+  if (summaries.length) {
+    const latest = summaries[summaries.length - 1];
+    const body = (latest[3] || '').trim();
+    if (body) {
+      const statusLine = body.split('\n').find(l => /^STATUS\s*:/i.test(l));
+      const summaryLine = body.split('\n').find(l => l.length > 20 && !/^STATUS\s*:|^FILES?\s*:|^TESTS?\s*:/i.test(l) && !/^```/.test(l));
+      return { history, latestSummary: { status: latest[1].toLowerCase(), summary: compactLine(summaryLine || '', 300), statusLine: statusLine ? compactLine(statusLine, 120) : null } };
+    }
+  }
+
+  return { history, latestSummary: null };
+}
+
+function renderReviewHistory(task) {
+  const { history, latestSummary } = parseReviewHistory(task);
+  if (!history.length && !latestSummary) {
+    return '<div class="empty-state" style="padding:var(--space-2);text-align:left;">No review history yet.</div>';
+  }
+
+  let html = '';
+  if (latestSummary) {
+    const color = latestSummary.status === 'completed' ? 'var(--brand-mint)' :
+                  latestSummary.status === 'failed' ? 'var(--brand-red)' : 'var(--brand-amber)';
+    html += `<div style="margin-bottom:var(--space-4);padding:var(--space-3);border:1px solid ${color}40;border-radius:var(--radius-lg);background:${color}10;">
+      <div class="section-eyebrow" style="color:${color};margin-bottom:var(--space-2);">LATEST WORKER SUMMARY (${latestSummary.status.toUpperCase()})</div>
+      <div style="font:400 var(--font-size-sm) var(--font-mono);color:var(--text-primary);line-height:1.55;">${escapeHtml(latestSummary.summary)}</div>
+      ${latestSummary.statusLine ? `<div style="margin-top:var(--space-2);font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);">${escapeHtml(latestSummary.statusLine)}</div>` : ''}
+    </div>`;
+  }
+
+  if (history.length) {
+    html += `<div class="section-eyebrow" style="margin-top:${latestSummary ? 'var(--space-4)' : '0'};">STATUS HISTORY</div>`;
+    html += history.map(h => {
+      const badgeColor = h.status === 'completed' ? 'var(--brand-mint)' :
+                        h.status === 'failed' ? 'var(--brand-red)' :
+                        h.status === 'blocked' ? 'var(--brand-amber)' :
+                        h.type === 'claim' ? 'var(--brand-cyan)' :
+                        h.type === 'reset' ? 'var(--brand-amber)' : 'var(--text-muted)';
+      const timeStr = h.time ? escapeHtml(h.time.toLocaleString()) : '';
+      const badge = Badge({ text: h.text, color: badgeColor, variant: 'subtle' });
+      return `<div style="display:flex;align-items:center;gap:var(--space-2);padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.04);">
+        <span style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);min-width:140px;">${timeStr}</span>
+        ${badge}
+      </div>`;
+    }).join('');
+  }
+
+  return html;
+}
+
 function renderTaskMetaBadges(task, meta = parseTaskNotes(task)) {
   const badges = [];
   if (meta.resultStatus) badges.push(Badge({ text: meta.resultStatus, color: taskStatusColor(meta.resultStatus), variant: 'subtle' }));
@@ -2111,6 +2233,7 @@ function renderTaskBoard() {
           <span class="task-time">${relativeTime(t.created_at)}</span>
           <div class="task-actions">
             <button class="task-btn" onclick="openReviewDrawer('${escapeAttr(t.id)}')">Details</button>
+            ${col === 'in_progress' && t.stale ? `<button class="task-btn" style="color:var(--brand-red);" onclick="resetStaleTask('${escapeAttr(t.id)}')" title="Reset stale claim to pending (worker recovery path)">↻ Reset</button>` : ''}
             ${col !== 'pending' ? `<button class="task-btn" onclick="moveTask('${escapeAttr(t.id)}','${col === 'review' ? 'in_progress' : 'pending'}')">◀</button>` : ''}
             ${col === 'review' ? `${t.pr_url ? `<a href="${escapeAttr(t.pr_url)}" target="_blank" rel="noopener" class="task-btn" style="color:var(--brand-cyan);text-decoration:none;font-size:11px;padding:2px 6px;border:1px solid rgba(125,211,252,0.3);border-radius:4px;" title="View diff / PR">↗ Diff</a>` : `<button class="task-btn" onclick="setTaskPr('${escapeAttr(t.id)}')" title="Set PR / diff URL" style="color:var(--brand-gold);">🔗</button>`}<button class="task-btn" style="color:#4ade80;" onclick="deleteTask('${escapeAttr(t.id)}')" title="Clear from board">✓</button>` : `<button class="task-btn" onclick="moveTask('${escapeAttr(t.id)}','${col === 'pending' ? 'in_progress' : 'review'}')">▶</button>`}
             ${col !== 'review' ? `<button class="task-btn" onclick="deleteTask('${escapeAttr(t.id)}')">✕</button>` : ''}
@@ -2182,6 +2305,96 @@ window.refreshWorkerLog = async function() {
   }
   renderTaskBoard();
 };
+
+function updateLogFollowButton() {
+  const btn = document.querySelector('.worker-log-follow');
+  if (!btn) return;
+  btn.classList.toggle('following', workerLogFollow);
+  btn.classList.toggle('paused', !workerLogFollow);
+  const span = btn.querySelector('span:last-child');
+  if (span) span.textContent = workerLogFollow ? 'Following' : 'Paused';
+}
+
+window.toggleLogFollow = function() {
+  workerLogFollow = !workerLogFollow;
+  updateLogFollowButton();
+  if (workerLogFollow) {
+    scrollLogToBottom();
+    startLogPolling();
+  } else {
+    stopLogPolling();
+  }
+};
+
+function scrollLogToBottom() {
+  const pre = document.getElementById('workerLogPre');
+  if (pre) pre.scrollTop = pre.scrollHeight;
+}
+
+function isScrolledToBottom(el, threshold = 50) {
+  return el.scrollTop + el.clientHeight >= el.scrollHeight - threshold;
+}
+
+function handleLogScroll() {
+  const pre = document.getElementById('workerLogPre');
+  if (!pre) return;
+  if (!isScrolledToBottom(pre)) {
+    if (workerLogFollow) {
+      workerLogFollow = false;
+      updateLogFollowButton();
+      stopLogPolling();
+    }
+  } else if (!workerLogFollow) {
+    workerLogFollow = true;
+    updateLogFollowButton();
+    startLogPolling();
+  }
+}
+
+async function pollWorkerLog() {
+  if (!workerLogFollow) return;
+  try {
+    const [workerRes, logRes] = await Promise.all([fetch('api/worker/status'), fetch('api/worker/log?lines=120')]);
+    const newWorkerState = await workerRes.json();
+    const newLogState = await logRes.json();
+    const pre = document.getElementById('workerLogPre');
+    const wasAtBottom = pre && isScrolledToBottom(pre);
+    workerState = newWorkerState;
+    workerLogState = newLogState;
+    const logLines = (workerLogState.lines || []).slice(-120);
+    const logHtml = logLines.length ? logLines.map(line => escapeHtml(line)).join('\n') : 'No worker log yet.';
+    if (pre) {
+      pre.textContent = logLines.length ? logLines.join('\n') : 'No worker log yet.';
+      if (wasAtBottom || workerLogFollow) {
+        pre.scrollTop = pre.scrollHeight;
+      }
+    }
+    const logNameEl = document.querySelector('.worker-log-path');
+    if (logNameEl && workerLogState.path) {
+      logNameEl.textContent = workerLogState.path.split('/').slice(-1)[0] || 'agentos-task-worker.log';
+      logNameEl.title = workerLogState.path;
+    }
+    const logMetaEl = document.querySelector('.worker-meta');
+    if (logMetaEl && workerState.last_log_at) {
+      const logSizeKB = Math.round((workerState.log_size || 0) / 1024);
+      logMetaEl.innerHTML = logMetaEl.innerHTML.replace(/last log .*? • [\d.]+ KB/, `last log ${relativeUnix(workerState.last_log_at)} • ${logSizeKB} KB`);
+    }
+  } catch(e) {
+    console.error('Log poll failed:', e);
+  }
+}
+
+function startLogPolling() {
+  if (workerLogPollInterval) return;
+  workerLogPollInterval = setInterval(pollWorkerLog, 2000);
+}
+
+function stopLogPolling() {
+  if (workerLogPollInterval) {
+    clearInterval(workerLogPollInterval);
+    workerLogPollInterval = null;
+  }
+}
 
 window.resetStaleTask = async function(taskId) {
   if (!confirm('Reset this stale in_progress task back to pending?')) return;
@@ -2265,6 +2478,11 @@ window.openReviewDrawer = function(taskId) {
     </div>
 
     ${renderTaskStructuredSummary(task, meta)}
+
+    <div style="margin:var(--space-4) 0;">
+      <div class="section-eyebrow">REVIEW HISTORY</div>
+      ${renderReviewHistory(task)}
+    </div>
 
     <div style="margin:var(--space-4) 0;">
       <div class="section-eyebrow">DEPENDENCIES</div>
@@ -2914,6 +3132,8 @@ function startSSE() {
 // ══════════════════════════════════════════════════════════════
 // INIT
 // ══════════════════════════════════════════════════════════════
+const initialTab = getInitialTab();
+if (initialTab !== currentTab) switchTab(initialTab);
 fetchSnapshot();
 startSSE();
 </script>
