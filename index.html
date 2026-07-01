@@ -162,7 +162,57 @@
     .grid-5 { display: grid; grid-template-columns: repeat(5, 1fr); gap: var(--space-3); }
     .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-3); }
     .grid-ops { display: grid; grid-template-columns: 180px 1fr 1fr; gap: var(--space-5); }
-    .grid-tasks { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-4); }
+    .grid-tasks { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-4); align-items: stretch; }
+    .tasks-shell { display: flex; flex-direction: column; gap: var(--space-4); }
+    .tasks-console {
+      display: grid;
+      grid-template-columns: minmax(280px, 0.75fr) minmax(520px, 1.25fr);
+      gap: var(--space-4);
+      align-items: stretch;
+    }
+    .task-hero-card, .worker-console {
+      background: linear-gradient(135deg, rgba(31,31,43,0.72), rgba(18,18,30,0.78));
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: var(--radius-xl);
+      box-shadow: 0 14px 44px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.05);
+      overflow: hidden;
+      position: relative;
+    }
+    .task-hero-card { padding: var(--space-4); min-height: 196px; display:flex; flex-direction:column; justify-content:space-between; }
+    .task-kicker { font: 500 var(--font-size-xs) var(--font-mono); color: var(--brand-cyan); letter-spacing: var(--letter-spacing-wide); text-transform: uppercase; margin-bottom: var(--space-2); }
+    .task-page-title { font: 600 clamp(34px, 4vw, 62px) var(--font-display); letter-spacing: -0.055em; line-height: 0.92; color: var(--text-primary); margin: 0; }
+    .task-page-copy { font: 400 var(--font-size-sm) var(--font-mono); color: var(--text-muted); line-height: 1.55; max-width: 440px; margin-top: var(--space-3); }
+    .task-overview-stats { display:grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-2); margin-top: var(--space-4); }
+    .task-overview-stat { padding: var(--space-2); border-radius: var(--radius-md); background: rgba(255,255,255,0.035); border: 1px solid rgba(255,255,255,0.06); }
+    .task-overview-stat strong { display:block; font: 600 var(--font-size-xl) var(--font-display); color: var(--text-primary); line-height:1; }
+    .task-overview-stat span { display:block; margin-top: 4px; font: 500 10px var(--font-mono); color: var(--text-muted); letter-spacing: var(--letter-spacing-wide); text-transform:uppercase; }
+    .worker-console { padding: var(--space-3); }
+    .worker-console::before, .task-hero-card::before {
+      content:''; position:absolute; inset:0 0 auto 0; height:1px;
+      background: linear-gradient(90deg, transparent, rgba(125,211,252,0.55), rgba(94,226,181,0.42), transparent);
+      pointer-events:none;
+    }
+    .worker-topline { display:flex; justify-content:space-between; align-items:flex-start; gap:var(--space-3); margin-bottom:var(--space-3); }
+    .worker-state-row { display:flex; align-items:center; gap:var(--space-2); flex-wrap:wrap; }
+    .worker-status-pill {
+      display:inline-flex; align-items:center; gap:7px; padding:5px 10px; border-radius:var(--radius-full);
+      background: rgba(94,226,181,0.09); border: 1px solid rgba(94,226,181,0.18);
+      font:600 var(--font-size-xs) var(--font-mono); color:var(--brand-mint);
+    }
+    .worker-status-pill.stopped { color: var(--brand-amber); background: rgba(245,181,68,0.08); border-color: rgba(245,181,68,0.18); }
+    .worker-dot { width:7px; height:7px; border-radius:50%; background: currentColor; box-shadow:0 0 12px currentColor; }
+    .worker-meta { font:400 11px var(--font-mono); color:var(--text-muted); margin-top:6px; }
+    .worker-actions { display:flex; gap:var(--space-2); flex-wrap:wrap; justify-content:flex-end; }
+    .worker-split { display:grid; grid-template-columns:minmax(220px, 0.7fr) minmax(360px, 1.3fr); gap:var(--space-3); }
+    .worker-current, .worker-log { border:1px solid rgba(255,255,255,0.075); border-radius:var(--radius-lg); background:rgba(8,10,20,0.42); min-width:0; }
+    .worker-current { padding:var(--space-3); }
+    .worker-current-title { font:600 var(--font-size-sm) var(--font-display); color:var(--text-primary); margin: 6px 0; }
+    .worker-log { padding:0; overflow:hidden; }
+    .worker-log-head { display:flex; justify-content:space-between; gap:var(--space-2); align-items:center; padding:var(--space-2) var(--space-3); border-bottom:1px solid rgba(255,255,255,0.06); background:rgba(255,255,255,0.025); }
+    .worker-log-path { font:400 10px var(--font-mono); color:var(--text-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:360px; }
+    .worker-log-pre { max-height:176px; overflow:auto; white-space:pre-wrap; font:400 11px/1.45 var(--font-mono); margin:0; padding:var(--space-3); color:rgba(244,244,248,0.86); background:rgba(0,0,0,0.18); }
+    .task-lane-card { min-height: 136px; }
+    .task-lane-card .empty-state { min-height: 62px; display:flex; align-items:center; justify-content:center; }
     .workspace-lane-grid { display: grid; gap: var(--space-3); }
     .repo-board-grid { display: grid; gap: var(--space-2); }
 
@@ -693,6 +743,9 @@
       .grid-5 { grid-template-columns: repeat(2, 1fr); }
       .grid-4 { grid-template-columns: repeat(2, 1fr); }
       .grid-tasks { grid-template-columns: 1fr; }
+      .tasks-console { grid-template-columns: 1fr; }
+      .worker-split { grid-template-columns: 1fr; }
+      .worker-log-pre { max-height: 220px; }
       .content-layout { grid-template-columns: 1fr; }
       #workspaceStatsGrid { grid-template-columns: 1fr !important; }
     }
@@ -729,6 +782,11 @@
       .content-layout,
       #workspaceStatsGrid,
       #agentStats { grid-template-columns: 1fr !important; }
+      .tasks-console,
+      .worker-split { grid-template-columns: 1fr !important; }
+      .worker-topline { flex-direction: column; align-items: stretch; }
+      .worker-actions { justify-content: flex-start; }
+      .task-overview-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .section-heading { font-size: var(--font-size-2xl); }
       .log-table { display: block; overflow-x: auto; white-space: nowrap; }
@@ -893,14 +951,24 @@
 
   <!-- TASKS TAB -->
   <div class="tab-panel" id="tab-tasks">
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:var(--space-3);flex-wrap:wrap;margin-bottom:var(--space-3);">
-      <div>
-        <div class="section-eyebrow">OPERATOR BOARD</div>
-        <div class="section-heading">Your Tasks</div>
+    <div class="tasks-shell">
+      <div class="tasks-console">
+        <section class="task-hero-card" id="taskHeroCard">
+          <div>
+            <div class="task-kicker">OPERATOR BOARD</div>
+            <h1 class="task-page-title">Tasks</h1>
+            <p class="task-page-copy">Queue work, watch the daemon, and keep finished changes in review. No giant vanity header. You're welcome.</p>
+          </div>
+          <div class="task-overview-stats" id="taskOverviewStats">
+            <div class="task-overview-stat"><strong>—</strong><span>Pending</span></div>
+            <div class="task-overview-stat"><strong>—</strong><span>Active</span></div>
+            <div class="task-overview-stat"><strong>—</strong><span>Review</span></div>
+          </div>
+        </section>
+        <div id="taskBoardControls"></div>
       </div>
-      <div id="taskBoardControls" style="flex:1 1 420px;max-width:720px;"></div>
+      <div class="grid-tasks" id="taskBoard"></div>
     </div>
-    <div class="grid-tasks" id="taskBoard"></div>
   </div>
 
   <!-- SCHEDULE TAB -->
@@ -1661,46 +1729,48 @@ function formatSeconds(seconds) {
 
 function renderWorkerControls() {
   const running = !!workerState.running;
-  const statusColor = running ? 'var(--status-active)' : 'var(--brand-amber)';
-  const statusLabel = running ? 'Automation Running' : 'Automation Stopped';
+  const statusLabel = running ? 'Automation running' : 'Automation stopped';
   const detail = workerState.pid ? `PID ${workerState.pid} via ${workerState.pid_source || 'unknown'}` : (workerState.lock_exists ? 'lock present' : 'idle');
-  const btnLabel = workerActionPending ? 'Working…' : (running ? 'Stop Automation' : 'Start Automation');
+  const btnLabel = workerActionPending ? 'Working…' : (running ? 'Stop automation' : 'Start automation');
   const btnClass = running ? 'btn-secondary' : 'btn-primary';
   const task = workerState.current_task;
-  const taskTitle = task ? escapeHtml(task.title || task.id) : 'No active claimed task';
+  const taskTitle = task ? escapeHtml(task.title || task.id) : 'No claimed task';
   const stale = !!task?.stale;
   const logLines = (workerLogState.lines || []).slice(-80);
   const logHtml = logLines.length ? logLines.map(line => escapeHtml(line)).join('\n') : 'No worker log yet.';
   const logMeta = workerState.last_log_at ? `last log ${relativeUnix(workerState.last_log_at)} • ${Math.round((workerState.log_size || 0) / 1024)} KB` : 'no log writes yet';
+  const logName = (workerLogState.path || '').split('/').slice(-1)[0] || 'agentos-task-worker.log';
   return `
-    <div class="glass-card glow-cyan" style="padding:var(--space-3);margin-bottom:var(--space-3);">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:var(--space-3);flex-wrap:wrap;">
+    <section class="worker-console">
+      <div class="worker-topline">
         <div>
           <div class="section-eyebrow">WORKER HEALTH</div>
-          <div style="font:600 var(--font-size-sm) var(--font-mono);color:${statusColor};margin-top:4px;">${statusLabel}</div>
-          <div style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);margin-top:2px;">${detail} • ${escapeHtml(logMeta)}</div>
+          <div class="worker-state-row">
+            <span class="worker-status-pill ${running ? '' : 'stopped'}"><span class="worker-dot"></span>${statusLabel}</span>
+          </div>
+          <div class="worker-meta">${escapeHtml(detail)} • ${escapeHtml(logMeta)}</div>
         </div>
-        <div style="display:flex;gap:var(--space-2);flex-wrap:wrap;justify-content:flex-end;">
-          <button class="btn-secondary" onclick="refreshWorkerLog()">Refresh Log</button>
+        <div class="worker-actions">
+          <button class="btn-secondary" onclick="refreshWorkerLog()">Refresh log</button>
           <button class="${btnClass}" onclick="toggleWorker()" ${workerActionPending ? 'disabled' : ''}>${btnLabel}</button>
         </div>
       </div>
-      <div style="display:grid;grid-template-columns:minmax(240px, 0.8fr) minmax(320px, 1.2fr);gap:var(--space-3);margin-top:var(--space-3);">
-        <div style="border:1px solid rgba(255,255,255,0.08);border-radius:var(--radius-md);padding:var(--space-3);background:rgba(0,0,0,0.18);">
+      <div class="worker-split">
+        <div class="worker-current">
           <div class="section-eyebrow">CURRENT TASK</div>
-          <div style="font:600 var(--font-size-sm) var(--font-mono);color:${stale ? 'var(--brand-red)' : 'var(--text-primary)'};margin-top:var(--space-2);">${taskTitle}</div>
-          ${task ? `<div style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);margin-top:var(--space-1);">${escapeHtml(task.id)}<br>claimed ${task.claimed_at ? escapeHtml(relativeTime(task.claimed_at)) : 'unknown'} • age ${formatSeconds(task.stale_seconds)}</div>` : `<div style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);margin-top:var(--space-1);">Worker has nothing claimed right now.</div>`}
-          ${stale ? `<div style="margin-top:var(--space-2);">${Badge({ text: 'STALE CLAIM', color: 'var(--brand-red)', variant: 'subtle' })}</div><button class="btn-secondary" style="margin-top:var(--space-2);color:var(--brand-amber);" onclick="resetStaleTask('${escapeAttr(task.id)}')">Reset to Pending</button>` : ''}
+          <div class="worker-current-title" style="color:${stale ? 'var(--brand-red)' : 'var(--text-primary)'};">${taskTitle}</div>
+          ${task ? `<div class="worker-meta">${escapeHtml(task.id)}<br>claimed ${task.claimed_at ? escapeHtml(relativeTime(task.claimed_at)) : 'unknown'} • age ${formatSeconds(task.stale_seconds)}</div>` : `<div class="worker-meta">Worker is idle. Nothing is secretly happening. Probably.</div>`}
+          ${stale ? `<div style="margin-top:var(--space-2);">${Badge({ text: 'STALE CLAIM', color: 'var(--brand-red)', variant: 'subtle' })}</div><button class="btn-secondary" style="margin-top:var(--space-2);color:var(--brand-amber);" onclick="resetStaleTask('${escapeAttr(task.id)}')">Reset to pending</button>` : ''}
         </div>
-        <div style="border:1px solid rgba(255,255,255,0.08);border-radius:var(--radius-md);padding:var(--space-3);background:rgba(0,0,0,0.22);min-width:0;">
-          <div style="display:flex;justify-content:space-between;gap:var(--space-2);align-items:center;margin-bottom:var(--space-2);">
-            <div class="section-eyebrow">LOG TAIL</div>
-            <span style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);">${escapeHtml(workerLogState.path || '')}</span>
+        <div class="worker-log">
+          <div class="worker-log-head">
+            <div class="section-eyebrow" style="margin-bottom:0;">LOG TAIL</div>
+            <span class="worker-log-path" title="${escapeAttr(workerLogState.path || '')}">${escapeHtml(logName)}</span>
           </div>
-          <pre style="max-height:260px;overflow:auto;white-space:pre-wrap;font-size:11px;line-height:1.45;margin:0;">${logHtml}</pre>
+          <pre class="worker-log-pre">${logHtml}</pre>
         </div>
       </div>
-    </div>`;
+    </section>`;
 }
 
 function getTask(taskId) {
@@ -1710,6 +1780,18 @@ function getTask(taskId) {
 function renderTaskBoard() {
   const cols = ['pending', 'in_progress', 'review'];
   const labels = ['Pending', 'In Progress', 'Review'];
+  const counts = {
+    pending: boardData.filter(t => t.status === 'pending').length,
+    in_progress: boardData.filter(t => t.status === 'in_progress').length,
+    review: boardData.filter(t => t.status === 'review').length,
+  };
+  const statEl = document.getElementById('taskOverviewStats');
+  if (statEl) {
+    statEl.innerHTML = `
+      <div class="task-overview-stat"><strong>${counts.pending}</strong><span>Pending</span></div>
+      <div class="task-overview-stat"><strong>${counts.in_progress}</strong><span>Active</span></div>
+      <div class="task-overview-stat"><strong>${counts.review}</strong><span>Review</span></div>`;
+  }
   document.getElementById('taskBoardControls').innerHTML = renderWorkerControls();
   document.getElementById('taskBoard').innerHTML = cols.map((col, i) => {
     const tasks = boardData.filter(t => t.status === col);
@@ -1742,6 +1824,7 @@ function renderTaskBoard() {
       </div>`;
     }).join('');
     return GlassCard({
+      className: 'task-lane-card',
       children: `<div class="task-column-header">${labels[i]} ${Badge({ text: String(tasks.length), color: 'var(--text-muted)', variant: 'subtle' })} ${addBtn}</div><div id="col-${col}">${cards || '<div class="empty-state" style="padding:var(--space-4);">No tasks</div>'}</div>`,
       style: 'padding: var(--space-3);'
     });
