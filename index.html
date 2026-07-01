@@ -749,6 +749,58 @@
       .nav-dot { width: 6px; height: 6px; }
       .main-content { padding: var(--space-2); }
     }
+
+    /* ── Review Drawer ── */
+    .review-drawer-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 200;
+      background: rgba(0,0,0,0.45);
+      backdrop-filter: blur(6px);
+      display: none;
+    }
+    .review-drawer-backdrop.open { display: block; }
+    .review-drawer {
+      position: fixed;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      width: min(720px, 94vw);
+      z-index: 201;
+      background: rgba(21,21,31,0.92);
+      border-left: 1px solid rgba(255,255,255,0.12);
+      box-shadow: -20px 0 80px rgba(0,0,0,0.45), inset 1px 0 0 rgba(255,255,255,0.06);
+      backdrop-filter: blur(24px) saturate(1.3);
+      transform: translateX(100%);
+      transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+      overflow-y: auto;
+      padding: var(--space-4);
+    }
+    .review-drawer.open { transform: translateX(0); }
+    .review-drawer pre {
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: rgba(0,0,0,0.35);
+      border: 1px solid rgba(255,255,255,0.07);
+      border-radius: var(--radius-md);
+      padding: var(--space-3);
+      color: var(--text-primary);
+      font: 400 var(--font-size-sm) var(--font-mono);
+      line-height: 1.6;
+    }
+    .drawer-action-row { display: flex; gap: var(--space-2); flex-wrap: wrap; margin: var(--space-3) 0; }
+    .blocked-chip {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: var(--radius-full);
+      background: rgba(245,181,68,0.14);
+      color: var(--brand-amber);
+      border: 1px solid rgba(245,181,68,0.25);
+      font: 500 var(--font-size-xs) var(--font-mono);
+      text-transform: uppercase;
+    }
+
   </style>
 </head>
 <body>
@@ -873,6 +925,9 @@
   </div>
 
 </div>
+
+<div id="reviewDrawerBackdrop" class="review-drawer-backdrop" onclick="closeReviewDrawer()"></div>
+<aside id="reviewDrawer" class="review-drawer" aria-label="Review task details"></aside>
 
 <script type="module">
 import { GlassCard, Badge, StatCard, ProgressBar, ThinBar, DonutChart, drawDonut } from './components.js';
@@ -1611,6 +1666,10 @@ function renderWorkerControls() {
     </div>`;
 }
 
+function getTask(taskId) {
+  return boardData.find(t => t.id === taskId);
+}
+
 function renderTaskBoard() {
   const cols = ['pending', 'in_progress', 'review'];
   const labels = ['Pending', 'In Progress', 'Review'];
@@ -1618,23 +1677,33 @@ function renderTaskBoard() {
   document.getElementById('taskBoard').innerHTML = cols.map((col, i) => {
     const tasks = boardData.filter(t => t.status === col);
     const addBtn = col === 'pending' ? `<button class="btn-secondary" style="font-size:11px;padding:3px 10px;" onclick="showAddTask()">+ Add</button>` : '';
-    const cards = tasks.map((t, ti) => `
+    const cards = tasks.map((t, ti) => {
+      const title = escapeHtml(t.title || 'Untitled task');
+      const priority = escapeHtml(t.priority || 'medium');
+      const notePreview = t.notes ? escapeHtml(t.notes.length > 200 ? t.notes.substring(0, 200) + '…' : t.notes) : '';
+      const depCount = (t.depends_on || []).length;
+      return `
       <div class="task-card dissolve-in" style="${staggerDelay(ti)}">
-        <div style="display:flex;justify-content:space-between;align-items:center;">
-          <div class="task-title">${t.title}</div>
-          <span class="priority-chip priority-${t.priority}">${t.priority}</span>
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:var(--space-2);">
+          <button class="task-title" style="background:none;border:none;padding:0;text-align:left;cursor:pointer;" onclick="openReviewDrawer('${escapeAttr(t.id)}')">${title}</button>
+          <span class="priority-chip priority-${priority}">${priority}</span>
         </div>
-        ${t.notes ? `<div class="task-notes">${escHtml(t.notes.length > 200 ? t.notes.substring(0, 200) + '…' : t.notes)}</div>` : ''}
+        <div style="display:flex;gap:var(--space-1);flex-wrap:wrap;margin-bottom:var(--space-1);">
+          ${t.blocked ? '<span class="blocked-chip">Blocked</span>' : ''}
+          ${depCount ? Badge({ text: `${depCount} dep${depCount === 1 ? '' : 's'}`, color: 'var(--brand-amber)', variant: 'subtle' }) : ''}
+        </div>
+        ${notePreview ? `<div class="task-notes">${notePreview}</div>` : ''}
         <div class="task-footer">
           <span class="task-time">${relativeTime(t.created_at)}</span>
           <div class="task-actions">
-            ${col !== 'pending' ? `<button class="task-btn" onclick="moveTask('${t.id}','${col === 'review' ? 'in_progress' : 'pending'}')">◀</button>` : ''}
-            ${col === 'review' ? `${t.pr_url ? `<a href="${escapeAttr(t.pr_url)}" target="_blank" rel="noopener" class="task-btn" style="color:var(--brand-cyan);text-decoration:none;font-size:11px;padding:2px 6px;border:1px solid rgba(125,211,252,0.3);border-radius:4px;" title="View diff / PR">↗ Diff</a>` : `<button class="task-btn" onclick="setTaskPr('${t.id}')" title="Set PR / diff URL" style="color:var(--brand-gold);">🔗</button>`}<button class="task-btn" style="color:#4ade80;" onclick="deleteTask('${t.id}')" title="Clear from board">✓</button>` : `<button class="task-btn" onclick="moveTask('${t.id}','${col === 'pending' ? 'in_progress' : 'review'}')">▶</button>`}
-            ${col !== 'review' ? `<button class="task-btn" onclick="deleteTask('${t.id}')">✕</button>` : ''}
+            <button class="task-btn" onclick="openReviewDrawer('${escapeAttr(t.id)}')">Details</button>
+            ${col !== 'pending' ? `<button class="task-btn" onclick="moveTask('${escapeAttr(t.id)}','${col === 'review' ? 'in_progress' : 'pending'}')">◀</button>` : ''}
+            ${col === 'review' ? `${t.pr_url ? `<a href="${escapeAttr(t.pr_url)}" target="_blank" rel="noopener" class="task-btn" style="color:var(--brand-cyan);text-decoration:none;font-size:11px;padding:2px 6px;border:1px solid rgba(125,211,252,0.3);border-radius:4px;" title="View diff / PR">↗ Diff</a>` : `<button class="task-btn" onclick="setTaskPr('${escapeAttr(t.id)}')" title="Set PR / diff URL" style="color:var(--brand-gold);">🔗</button>`}<button class="task-btn" style="color:#4ade80;" onclick="deleteTask('${escapeAttr(t.id)}')" title="Clear from board">✓</button>` : `<button class="task-btn" onclick="moveTask('${escapeAttr(t.id)}','${col === 'pending' ? 'in_progress' : 'review'}')">▶</button>`}
+            ${col !== 'review' ? `<button class="task-btn" onclick="deleteTask('${escapeAttr(t.id)}')">✕</button>` : ''}
           </div>
         </div>
-      </div>
-    `).join('');
+      </div>`;
+    }).join('');
     return GlassCard({
       children: `<div class="task-column-header">${labels[i]} ${Badge({ text: String(tasks.length), color: 'var(--text-muted)', variant: 'subtle' })} ${addBtn}</div><div id="col-${col}">${cards || '<div class="empty-state" style="padding:var(--space-4);">No tasks</div>'}</div>`,
       style: 'padding: var(--space-3);'
@@ -1662,17 +1731,18 @@ window.submitTask = async function() {
   const notes = document.getElementById('newTaskNotes').value.trim();
   await fetch('api/board', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ title, priority, notes }) });
   document.getElementById('addTaskContainer').innerHTML = '';
-  loadTasks();
+  await loadTasks();
 };
 
 window.moveTask = async function(id, newStatus) {
-  await fetch('api/board/update?id=' + id, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ status: newStatus }) });
-  loadTasks();
+  await fetch('api/board/update?id=' + encodeURIComponent(id), { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ status: newStatus }) });
+  await loadTasks();
 };
 
 window.deleteTask = async function(id) {
-  await fetch('api/board/delete?id=' + id, { method: 'POST' });
-  loadTasks();
+  await fetch('api/board/delete?id=' + encodeURIComponent(id), { method: 'POST' });
+  closeReviewDrawer();
+  await loadTasks();
 };
 
 window.toggleWorker = async function() {
@@ -1688,14 +1758,102 @@ window.toggleWorker = async function() {
 };
 
 window.setTaskPr = async function(taskId) {
-  const url = prompt('PR / diff URL (leave empty to clear):');
+  const currentUrl = getTask(taskId)?.pr_url || '';
+  const url = prompt('PR / diff URL (leave empty to clear):', currentUrl || '');
   if (url === null) return;
-  await fetch('/api/board/set-pr', {
+  await fetch('api/board/set-pr', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({ id: taskId, pr_url: url.trim() }),
   });
-  renderTaskBoard();
+  await loadTasks();
+  if (document.getElementById('reviewDrawer')?.classList.contains('open')) openReviewDrawer(taskId);
+};
+
+window.addTaskDependency = async function(taskId) {
+  const choices = boardData.filter(t => t.id !== taskId).map(t => `${t.id} — ${t.title}`).join('\n');
+  const dependsOn = prompt(`Dependency task ID. This task waits until that task is in review.\n\n${choices}`);
+  if (!dependsOn) return;
+  const depId = dependsOn.split(' ')[0].trim();
+  await fetch('api/board/deps/add', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ task_id: taskId, depends_on: depId }) });
+  await loadTasks();
+  openReviewDrawer(taskId);
+};
+
+window.removeTaskDependency = async function(taskId, depId) {
+  await fetch('api/board/deps/remove', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ task_id: taskId, depends_on: depId }) });
+  await loadTasks();
+  openReviewDrawer(taskId);
+};
+
+window.createFollowUpTask = async function(parentId) {
+  const parent = getTask(parentId);
+  const title = prompt('Follow-up task title:');
+  if (!title) return;
+  const notes = `Follow-up from ${parent?.title || parentId}\nParent task: ${parentId}`;
+  await fetch('api/board', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ title: title.trim(), priority: 'medium', notes }) });
+  await loadTasks();
+};
+
+window.openReviewDrawer = function(taskId) {
+  const task = getTask(taskId);
+  if (!task) return;
+  const deps = task.depends_on || [];
+  const depHtml = deps.length ? deps.map(depId => {
+    const dep = getTask(depId);
+    return `<div style="display:flex;justify-content:space-between;gap:var(--space-2);align-items:center;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.05);">
+      <span style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);">${escapeHtml(dep?.title || depId)}</span>
+      <button class="task-btn" onclick="removeTaskDependency('${escapeAttr(task.id)}','${escapeAttr(depId)}')">Remove</button>
+    </div>`;
+  }).join('') : '<div class="empty-state" style="padding:var(--space-2);text-align:left;">No dependencies.</div>';
+  const drawer = document.getElementById('reviewDrawer');
+  const backdrop = document.getElementById('reviewDrawerBackdrop');
+  drawer.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:var(--space-3);">
+      <div>
+        <div class="section-eyebrow">TASK DETAIL</div>
+        <h2 style="font:600 var(--font-size-xl) var(--font-display);margin:var(--space-1) 0;color:var(--text-primary);">${escapeHtml(task.title || 'Untitled task')}</h2>
+        <div style="display:flex;gap:var(--space-2);flex-wrap:wrap;align-items:center;">
+          ${Badge({ text: task.status || 'pending', color: task.status === 'review' ? 'var(--brand-mint)' : 'var(--brand-cyan)', variant: 'subtle' })}
+          ${Badge({ text: task.priority || 'medium', color: task.priority === 'high' ? 'var(--brand-red)' : 'var(--brand-amber)', variant: 'subtle' })}
+          ${task.blocked ? '<span class="blocked-chip">Blocked</span>' : ''}
+        </div>
+      </div>
+      <button class="btn-secondary" onclick="closeReviewDrawer()">Close</button>
+    </div>
+
+    <div class="drawer-action-row">
+      ${task.pr_url ? `<a class="btn-primary" href="${escapeAttr(task.pr_url)}" target="_blank" rel="noopener" style="text-decoration:none;">Open Diff</a>` : ''}
+      <button class="btn-secondary" onclick="setTaskPr('${escapeAttr(task.id)}')">${task.pr_url ? 'Edit Diff URL' : 'Add Diff URL'}</button>
+      <button class="btn-secondary" onclick="moveTask('${escapeAttr(task.id)}','in_progress')">Send Back</button>
+      <button class="btn-secondary" onclick="createFollowUpTask('${escapeAttr(task.id)}')">Create Follow-up</button>
+      ${task.status === 'review' ? `<button class="btn-primary" onclick="deleteTask('${escapeAttr(task.id)}')">Clear Review</button>` : ''}
+    </div>
+
+    <div style="margin:var(--space-4) 0;">
+      <div class="section-eyebrow">DEPENDENCIES</div>
+      ${depHtml}
+      <button class="btn-secondary" style="margin-top:var(--space-2);" onclick="addTaskDependency('${escapeAttr(task.id)}')">Add Dependency</button>
+    </div>
+
+    <div style="margin:var(--space-4) 0;">
+      <div class="section-eyebrow">WORKER NOTES</div>
+      <pre>${escapeHtml(task.notes || 'No notes yet.')}</pre>
+    </div>
+
+    <div style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);">
+      ID: ${escapeHtml(task.id)}<br>
+      Created: ${escapeHtml(task.created_at || '')}<br>
+      Updated: ${escapeHtml(task.updated_at || '—')}
+    </div>
+  `;
+  backdrop.classList.add('open');
+  drawer.classList.add('open');
+};
+
+window.closeReviewDrawer = function() {
+  document.getElementById('reviewDrawerBackdrop')?.classList.remove('open');
+  document.getElementById('reviewDrawer')?.classList.remove('open');
 };
 
 // ══════════════════════════════════════════════════════════════
@@ -1710,18 +1868,25 @@ function renderSchedule(d) {
   const renderCronGroup = (jobs, label, color) => {
     if (jobs.length === 0) return `<div class="section-eyebrow" style="margin-bottom:var(--space-3);">${label}</div><div class="empty-state">No scheduled jobs in this group.</div>`;
     return `<div class="section-eyebrow" style="margin-bottom:var(--space-3);">${label}</div>` +
-      jobs.map((j, i) => GlassCard({
-        children: `<div class="dissolve-in" style="${staggerDelay(i)}"><div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:var(--space-2);">
-          <div class="cron-cmd" title="${j.command}">${j.command}</div>
-          ${Badge({ text: j.owner, color: color, variant: 'subtle' })}
+      jobs.map((j, i) => {
+        const hasActions = j.owner === 'hermes' && j.job_id;
+        const enabled = j.enabled !== false;
+        return GlassCard({
+          children: `<div class="dissolve-in" style="${staggerDelay(i)}"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:var(--space-3);margin-bottom:var(--space-2);">
+          <div class="cron-cmd" title="${escapeAttr(j.command)}">${escapeHtml(j.command)}</div>
+          <div style="display:flex;gap:var(--space-2);align-items:center;flex-wrap:wrap;justify-content:flex-end;">
+            ${Badge({ text: enabled ? j.owner : 'paused', color: enabled ? color : 'var(--brand-amber)', variant: 'subtle' })}
+            ${hasActions ? `<button class="task-btn" onclick="toggleCronJob('${escapeAttr(j.job_id)}')">${enabled ? 'Pause' : 'Resume'}</button><button class="task-btn" style="color:var(--brand-red);" onclick="removeCronJob('${escapeAttr(j.job_id)}')">Remove</button>` : ''}
+          </div>
         </div>
-        <div style="display:flex;gap:var(--space-4);margin-bottom:var(--space-1);">
-          <div><span style="font:500 var(--font-size-xs) var(--font-mono);color:var(--text-muted);text-transform:uppercase;">Schedule </span><span class="cron-schedule">${j.schedule}</span></div>
+        <div style="display:flex;gap:var(--space-4);margin-bottom:var(--space-1);flex-wrap:wrap;">
+          <div><span style="font:500 var(--font-size-xs) var(--font-mono);color:var(--text-muted);text-transform:uppercase;">Schedule </span><span class="cron-schedule">${escapeHtml(j.schedule)}</span></div>
         </div>
-        <div class="cron-desc">${j.description}</div>
-        <div class="cron-source" style="margin-top:var(--space-2);">${j.source}</div></div>`,
-        style: 'padding: var(--space-3);'
-      })).join('');
+        <div class="cron-desc">${escapeHtml(j.description)}</div>
+        <div class="cron-source" style="margin-top:var(--space-2);">${escapeHtml(j.source)}</div></div>`,
+          style: 'padding: var(--space-3);'
+        });
+      }).join('');
   };
 
   document.getElementById('scheduleContent').innerHTML =
@@ -1729,6 +1894,19 @@ function renderSchedule(d) {
     '<div style="margin-top:var(--space-4);"></div>' +
     renderCronGroup(system, 'SYSTEM JOBS', 'var(--text-muted)');
 }
+
+window.toggleCronJob = async function(jobId) {
+  await fetch('api/cron/toggle', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ id: jobId }) });
+  lastScheduleSignature = null;
+  await fetchSnapshot();
+};
+
+window.removeCronJob = async function(jobId) {
+  if (!confirm('Remove this Hermes cron job?')) return;
+  await fetch('api/cron/remove', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ id: jobId }) });
+  lastScheduleSignature = null;
+  await fetchSnapshot();
+};
 
 // ══════════════════════════════════════════════════════════════
 // CONTENT TAB
@@ -1802,7 +1980,7 @@ async function loadContentDocs() {
 }
 
 function escapeAttr(str) {
-  return String(str).replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return String(str).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 function escapeHtml(str) {

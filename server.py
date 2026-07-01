@@ -64,16 +64,15 @@ def init_board_db():
         FOREIGN KEY (depends_on) REFERENCES tasks(id) ON DELETE CASCADE
     )""")
     conn.execute("PRAGMA foreign_keys = ON")
-    count = conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0]
-    if count == 0:
-        now = datetime.now(timezone.utc).isoformat()
-        seeds = [
-            ("infra-agentos", "Finish AgentOS dashboard wiring", "in_progress", "high", "Backed by Hermes sessions, ~/repos, and Tailscale Serve", now),
-            ("evilhotkeys-gw2", "evilhotkeys GW2 spec maintenance", "pending", "medium", "Pixel-state debugging, fishing/manual pool workflow, mechanist/untamed specs", now),
-            ("elemta-work", "Elemta MTA backlog", "pending", "medium", "Go MTA, observability, LDAP, queue/security work", now),
-            ("evilsdr-work", "evilSDR/Skywarn backlog", "pending", "medium", "SDR tooling, scan hits, GUI polish", now),
-        ]
-        conn.executemany("INSERT INTO tasks (id, title, status, priority, notes, created_at) VALUES (?,?,?,?,?,?)", seeds)
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(tasks)").fetchall()}
+    if "pr_url" not in cols:
+        conn.execute("ALTER TABLE tasks ADD COLUMN pr_url TEXT DEFAULT ''")
+    # Clean dependency rows left behind by older code paths that did not enable FK enforcement.
+    conn.execute("""DELETE FROM task_deps
+        WHERE task_id NOT IN (SELECT id FROM tasks)
+           OR depends_on NOT IN (SELECT id FROM tasks)""")
+    # Do not auto-seed demo/operator tasks here. Production boards should stay
+    # empty when cleared; task creation belongs to the operator/orchestrator.
     # The board workflow uses review as the post-worker review gate.
     # Normalize any done rows back into review so automation cannot skip human review.
     conn.execute("UPDATE tasks SET status = 'review', updated_at = COALESCE(updated_at, created_at) WHERE status = 'done'")
@@ -777,7 +776,7 @@ def _board_tasks():
         return []
     try:
         tasks = [dict(r) for r in conn.execute(
-            "SELECT id, title, status, priority, notes, created_at, updated_at FROM tasks ORDER BY COALESCE(updated_at, created_at) DESC"
+            "SELECT id, title, status, priority, notes, pr_url, created_at, updated_at FROM tasks ORDER BY COALESCE(updated_at, created_at) DESC"
         ).fetchall()]
         dep_map = {}
         for r in conn.execute("SELECT task_id, depends_on FROM task_deps").fetchall():
@@ -1054,11 +1053,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 pass
 
         elif path == "/api/board":
-            conn = sqlite3.connect(BOARD_DB)
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute("SELECT * FROM tasks ORDER BY created_at DESC").fetchall()
-            conn.close()
-            self.send_json([dict(r) for r in rows])
+            self.send_json(_board_tasks())
 
         elif path == "/api/content":
             self.send_json(_content_docs())
