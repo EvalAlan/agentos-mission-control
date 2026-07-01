@@ -1630,38 +1630,75 @@ function renderLogTable(entries, filter) {
 // ══════════════════════════════════════════════════════════════
 let boardData = [];
 let workerState = { running: false };
+let workerLogState = { exists: false, lines: [] };
 let workerActionPending = false;
 async function loadTasks() {
   try {
-    const [boardRes, workerRes] = await Promise.all([
+    const [boardRes, workerRes, logRes] = await Promise.all([
       fetch('api/board'),
       fetch('api/worker/status'),
+      fetch('api/worker/log?lines=80'),
     ]);
     boardData = await boardRes.json();
     workerState = await workerRes.json();
+    workerLogState = await logRes.json();
   } catch(e) {
     boardData = [];
     workerState = { running: false, error: String(e) };
+    workerLogState = { exists: false, lines: [] };
   }
   renderTaskBoard();
+}
+
+function formatSeconds(seconds) {
+  if (seconds === null || seconds === undefined) return '—';
+  seconds = Math.max(0, Number(seconds) || 0);
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
+  return `${Math.floor(seconds / 86400)}d ${Math.floor((seconds % 86400) / 3600)}h`;
 }
 
 function renderWorkerControls() {
   const running = !!workerState.running;
   const statusColor = running ? 'var(--status-active)' : 'var(--brand-amber)';
   const statusLabel = running ? 'Automation Running' : 'Automation Stopped';
-  const detail = workerState.pid ? `PID ${workerState.pid}` : (workerState.lock_exists ? 'lock present' : 'idle');
+  const detail = workerState.pid ? `PID ${workerState.pid} via ${workerState.pid_source || 'unknown'}` : (workerState.lock_exists ? 'lock present' : 'idle');
   const btnLabel = workerActionPending ? 'Working…' : (running ? 'Stop Automation' : 'Start Automation');
   const btnClass = running ? 'btn-secondary' : 'btn-primary';
+  const task = workerState.current_task;
+  const taskTitle = task ? escapeHtml(task.title || task.id) : 'No active claimed task';
+  const stale = !!task?.stale;
+  const logLines = (workerLogState.lines || []).slice(-80);
+  const logHtml = logLines.length ? logLines.map(line => escapeHtml(line)).join('\n') : 'No worker log yet.';
+  const logMeta = workerState.last_log_at ? `last log ${relativeUnix(workerState.last_log_at)} • ${Math.round((workerState.log_size || 0) / 1024)} KB` : 'no log writes yet';
   return `
     <div class="glass-card glow-cyan" style="padding:var(--space-3);margin-bottom:var(--space-3);">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:var(--space-3);flex-wrap:wrap;">
         <div>
-          <div class="section-eyebrow">TASK AUTOMATION</div>
+          <div class="section-eyebrow">WORKER HEALTH</div>
           <div style="font:600 var(--font-size-sm) var(--font-mono);color:${statusColor};margin-top:4px;">${statusLabel}</div>
-          <div style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);margin-top:2px;">Worker polls in_progress tasks and auto-runs them. ${detail}</div>
+          <div style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);margin-top:2px;">${detail} • ${escapeHtml(logMeta)}</div>
         </div>
-        <button class="${btnClass}" onclick="toggleWorker()" ${workerActionPending ? 'disabled' : ''}>${btnLabel}</button>
+        <div style="display:flex;gap:var(--space-2);flex-wrap:wrap;justify-content:flex-end;">
+          <button class="btn-secondary" onclick="refreshWorkerLog()">Refresh Log</button>
+          <button class="${btnClass}" onclick="toggleWorker()" ${workerActionPending ? 'disabled' : ''}>${btnLabel}</button>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:minmax(240px, 0.8fr) minmax(320px, 1.2fr);gap:var(--space-3);margin-top:var(--space-3);">
+        <div style="border:1px solid rgba(255,255,255,0.08);border-radius:var(--radius-md);padding:var(--space-3);background:rgba(0,0,0,0.18);">
+          <div class="section-eyebrow">CURRENT TASK</div>
+          <div style="font:600 var(--font-size-sm) var(--font-mono);color:${stale ? 'var(--brand-red)' : 'var(--text-primary)'};margin-top:var(--space-2);">${taskTitle}</div>
+          ${task ? `<div style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);margin-top:var(--space-1);">${escapeHtml(task.id)}<br>claimed ${task.claimed_at ? escapeHtml(relativeTime(task.claimed_at)) : 'unknown'} • age ${formatSeconds(task.stale_seconds)}</div>` : `<div style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);margin-top:var(--space-1);">Worker has nothing claimed right now.</div>`}
+          ${stale ? `<div style="margin-top:var(--space-2);">${Badge({ text: 'STALE CLAIM', color: 'var(--brand-red)', variant: 'subtle' })}</div><button class="btn-secondary" style="margin-top:var(--space-2);color:var(--brand-amber);" onclick="resetStaleTask('${escapeAttr(task.id)}')">Reset to Pending</button>` : ''}
+        </div>
+        <div style="border:1px solid rgba(255,255,255,0.08);border-radius:var(--radius-md);padding:var(--space-3);background:rgba(0,0,0,0.22);min-width:0;">
+          <div style="display:flex;justify-content:space-between;gap:var(--space-2);align-items:center;margin-bottom:var(--space-2);">
+            <div class="section-eyebrow">LOG TAIL</div>
+            <span style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);">${escapeHtml(workerLogState.path || '')}</span>
+          </div>
+          <pre style="max-height:260px;overflow:auto;white-space:pre-wrap;font-size:11px;line-height:1.45;margin:0;">${logHtml}</pre>
+        </div>
       </div>
     </div>`;
 }
@@ -1755,6 +1792,23 @@ window.toggleWorker = async function() {
     workerActionPending = false;
     await loadTasks();
   }
+};
+
+window.refreshWorkerLog = async function() {
+  try {
+    const [workerRes, logRes] = await Promise.all([fetch('api/worker/status'), fetch('api/worker/log?lines=80')]);
+    workerState = await workerRes.json();
+    workerLogState = await logRes.json();
+  } catch(e) {
+    workerLogState = { exists: false, lines: [`Failed to load worker log: ${e}`] };
+  }
+  renderTaskBoard();
+};
+
+window.resetStaleTask = async function(taskId) {
+  if (!confirm('Reset this stale in_progress task back to pending?')) return;
+  await fetch('api/worker/reset-task', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ id: taskId }) });
+  await loadTasks();
 };
 
 window.setTaskPr = async function(taskId) {

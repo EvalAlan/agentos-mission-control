@@ -133,6 +133,102 @@ def _worker_processes():
     return procs
 
 
+def _parse_iso_ts(value):
+    if not value:
+        return None
+    try:
+        text = str(value).replace("Z", "+00:00")
+        return datetime.fromisoformat(text)
+    except Exception:
+        return None
+
+
+def _worker_claim_time(notes):
+    matches = re.findall(r"AGENTOS_WORKER_CLAIM=([^\s]+)", notes or "")
+    if not matches:
+        return None
+    return _parse_iso_ts(matches[-1])
+
+
+def _current_worker_task():
+    conn = safe_read_db(BOARD_DB)
+    if not conn:
+        return None
+    try:
+        rows = conn.execute(
+            """SELECT id, title, status, priority, notes, updated_at, created_at
+               FROM tasks
+               WHERE status = 'in_progress'
+               ORDER BY COALESCE(updated_at, created_at) DESC"""
+        ).fetchall()
+        now = datetime.now(timezone.utc)
+        for row in rows:
+            task = dict(row)
+            claim_dt = _worker_claim_time(task.get("notes", ""))
+            updated_dt = _parse_iso_ts(task.get("updated_at") or task.get("created_at"))
+            age_dt = claim_dt or updated_dt
+            stale_seconds = None
+            if age_dt:
+                stale_seconds = max(0, int((now - age_dt).total_seconds()))
+            task["claimed_at"] = claim_dt.isoformat() if claim_dt else None
+            task["stale_seconds"] = stale_seconds
+            task["stale"] = bool(stale_seconds is not None and stale_seconds > 2 * 60 * 60)
+            task["notes"] = (task.get("notes") or "")[-1200:]
+            return task
+        return None
+    except Exception:
+        return None
+    finally:
+        conn.close()
+
+
+def _tail_file(path, max_lines=120, max_bytes=65536):
+    try:
+        if not os.path.isfile(path):
+            return []
+        size = os.path.getsize(path)
+        with open(path, "rb") as f:
+            if size > max_bytes:
+                f.seek(-max_bytes, os.SEEK_END)
+            data = f.read().decode("utf-8", errors="replace")
+        return data.splitlines()[-max_lines:]
+    except Exception as exc:
+        return [f"[error reading log: {exc}]"]
+
+
+def worker_log_tail(lines=120):
+    try:
+        lines = max(10, min(int(lines), 500))
+    except Exception:
+        lines = 120
+    return {
+        "path": WORKER_LOG,
+        "exists": os.path.isfile(WORKER_LOG),
+        "lines": _tail_file(WORKER_LOG, lines),
+    }
+
+
+def reset_stale_task(task_id):
+    if not task_id:
+        return {"ok": False, "error": "Missing task id"}
+    conn = sqlite3.connect(BOARD_DB)
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute("SELECT id, title, status, notes FROM tasks WHERE id=?", (task_id,)).fetchone()
+        if not row:
+            return {"ok": False, "error": "Task not found"}
+        if row["status"] != "in_progress":
+            return {"ok": False, "error": "Only in_progress tasks can be reset"}
+        notes = (row["notes"] or "").rstrip()
+        stamp = datetime.now(timezone.utc).isoformat()
+        notes = f"{notes}\n\nAGENTOS_OPERATOR_RESET={stamp}\nReset stale task to pending from worker health panel.".strip()
+        conn.execute("UPDATE tasks SET status='pending', notes=?, updated_at=? WHERE id=?", (notes, stamp, task_id))
+        conn.commit()
+        return {"ok": True, "task_id": task_id}
+    finally:
+        conn.close()
+
+
 def worker_status():
     pid = None
     pid_source = None
@@ -157,9 +253,11 @@ def worker_status():
         except Exception:
             pass
     last_log_at = None
+    log_size = 0
     if os.path.isfile(WORKER_LOG):
         try:
             last_log_at = os.path.getmtime(WORKER_LOG)
+            log_size = os.path.getsize(WORKER_LOG)
         except Exception:
             last_log_at = None
     return {
@@ -170,8 +268,10 @@ def worker_status():
         "lock_exists": os.path.exists(WORKER_LOCK),
         "pid_file_exists": os.path.exists(WORKER_PID),
         "log_path": WORKER_LOG,
+        "log_size": log_size,
         "last_log_at": last_log_at,
         "script": WORKER_SCRIPT,
+        "current_task": _current_worker_task(),
     }
 
 
@@ -1103,6 +1203,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
         elif path == "/api/worker/status":
             self.send_json(worker_status())
 
+        elif path == "/api/worker/log":
+            self.send_json(worker_log_tail(params.get("lines", ["120"])[0]))
+
         elif path == "/api/cron/jobs":
             self.send_json({"jobs": hermes_cron_jobs()})
 
@@ -1241,6 +1344,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
         elif path == "/api/worker/toggle":
             self.send_json(stop_worker() if worker_status().get("running") else start_worker())
+
+        elif path == "/api/worker/reset-task":
+            self.send_json(reset_stale_task(body.get("id", "")))
 
         elif path == "/api/cron/remove":
             job_id = body.get("id", "")
