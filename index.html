@@ -276,6 +276,41 @@
     }
     .task-title { font: 500 var(--font-size-sm) var(--font-display); margin-bottom: var(--space-1); color: var(--text-primary); }
     .task-notes { font: 400 var(--font-size-xs) var(--font-mono); color: var(--text-muted); margin-bottom: var(--space-2); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .task-meta-row { display:flex; gap:var(--space-1); flex-wrap:wrap; margin: var(--space-2) 0; }
+    .task-summary {
+      font: 400 var(--font-size-xs) var(--font-mono);
+      color: var(--text-muted);
+      line-height: 1.45;
+      margin: 0 0 var(--space-2);
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .task-file-list { display:flex; gap:4px; flex-wrap:wrap; margin-bottom: var(--space-2); }
+    .task-file-chip {
+      max-width: 180px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      padding: 2px 6px;
+      border-radius: var(--radius-sm);
+      background: rgba(125,211,252,0.08);
+      border: 1px solid rgba(125,211,252,0.14);
+      color: var(--brand-cyan);
+      font: 400 10px var(--font-mono);
+    }
+    .task-structured-summary {
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: var(--radius-lg);
+      background: rgba(8,10,20,0.34);
+      padding: var(--space-3);
+      margin: var(--space-4) 0;
+    }
+    .task-summary-grid { display:grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-2); margin-top: var(--space-2); }
+    .task-summary-cell { padding: var(--space-2); border-radius: var(--radius-md); background: rgba(255,255,255,0.035); border: 1px solid rgba(255,255,255,0.055); }
+    .task-summary-cell span { display:block; font:500 10px var(--font-mono); color:var(--text-muted); letter-spacing:var(--letter-spacing-wide); text-transform:uppercase; }
+    .task-summary-cell strong { display:block; margin-top:3px; font:600 var(--font-size-sm) var(--font-display); color:var(--text-primary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .task-footer { display: flex; align-items: center; justify-content: space-between; }
     .task-time { font: 400 var(--font-size-xs) var(--font-mono); color: var(--text-muted); }
     .task-actions { display: flex; gap: var(--space-1); }
@@ -1777,6 +1812,117 @@ function getTask(taskId) {
   return boardData.find(t => t.id === taskId);
 }
 
+function compactLine(text, max = 220) {
+  text = String(text || '').replace(/\s+/g, ' ').trim();
+  return text.length > max ? text.slice(0, max - 1) + '…' : text;
+}
+
+function taskStatusColor(status) {
+  const s = String(status || '').toLowerCase();
+  if (/fail|error|crash|timeout/.test(s)) return 'var(--brand-red)';
+  if (/block|warn/.test(s)) return 'var(--brand-amber)';
+  if (/done|complete|pass|review|success/.test(s)) return 'var(--brand-mint)';
+  if (/run|progress|claim/.test(s)) return 'var(--brand-cyan)';
+  return 'var(--text-muted)';
+}
+
+function parseTaskNotes(task) {
+  const notes = String(task?.notes || '');
+  const lines = notes.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const meta = {
+    workerState: '',
+    resultStatus: '',
+    filesText: '',
+    testsText: '',
+    summary: '',
+    blockers: [],
+    files: [],
+    rawHeading: '',
+  };
+
+  const headings = [...notes.matchAll(/WORKER\s+(COMPLETED|FAILED|BLOCKED)([^\n:]*)\s+at\s+([^\n:]+):/gi)];
+  if (headings.length) {
+    const h = headings[headings.length - 1];
+    meta.workerState = h[1].toLowerCase();
+    meta.rawHeading = compactLine(h[0].replace(/:$/, ''), 120);
+  }
+
+  const statusMatch = notes.match(/(?:^|\n)\s*STATUS\s*:\s*([^|\n]+)/i);
+  if (statusMatch) meta.resultStatus = compactLine(statusMatch[1], 48).toLowerCase();
+  else if (meta.workerState) meta.resultStatus = meta.workerState;
+  else if (/AGENTOS_WORKER_CLAIM=/.test(notes) && task?.status === 'in_progress') meta.resultStatus = 'claimed';
+
+  const filesMatch = notes.match(/(?:^|[|\n])\s*FILES\s*:\s*([^|\n]+)/i);
+  if (filesMatch) meta.filesText = compactLine(filesMatch[1], 48);
+
+  const testsMatch = notes.match(/(?:^|[|\n])\s*TESTS?\s*:\s*([^|\n]+)/i);
+  if (testsMatch) meta.testsText = compactLine(testsMatch[1], 60);
+
+  const fileRx = /(?:^|[`\s(])([\w@./-]+\.(?:py|js|ts|tsx|jsx|html|css|go|rs|md|json|ya?ml|toml|sh|sql|db|txt))(?:[`\s),:]|$)/gi;
+  const found = new Set();
+  let m;
+  while ((m = fileRx.exec(notes)) && found.size < 5) {
+    const file = m[1].replace(/^\.\//, '');
+    if (!file.includes('/.git/') && file.length <= 90) found.add(file);
+  }
+  meta.files = [...found];
+
+  const blockerLines = lines.filter(l => /\b(blocked|blocker|failed|error|timeout|crash|exception|traceback)\b/i.test(l));
+  meta.blockers = blockerLines.slice(-2).map(l => compactLine(l, 140));
+
+  const metadataLine = /^(STATUS|FILES?|TESTS?|Task ID|Title|Priority|Workspace|Rules|Notes|AGENTOS_|WORKER\s+(COMPLETED|FAILED|BLOCKED))/i;
+  const statusLineIndex = lines.findIndex(l => /^STATUS\s*:/i.test(l));
+  const headingIndex = lines.findIndex(l => /^WORKER\s+(COMPLETED|FAILED|BLOCKED)/i.test(l));
+  const summarySource = statusLineIndex >= 0 ? lines.slice(statusLineIndex + 1) : (headingIndex >= 0 ? lines.slice(headingIndex + 1) : lines);
+  const summaryCandidates = summarySource.filter(l => {
+    if (metadataLine.test(l)) return false;
+    if (/^Worker\s+(picked up|auto-pulled)\b/i.test(l)) return false;
+    if (/^[-*]\s*$/.test(l)) return false;
+    if (/^[-*]\s+[\w@./-]+\.(py|js|ts|tsx|jsx|html|css|go|rs|md|json|ya?ml|toml|sh|sql|db|txt)\b/i.test(l)) return false;
+    if (/^(changed files|tests\/checks|result|blockers?)\s*:/i.test(l)) return false;
+    if (/^```/.test(l)) return false;
+    return l.length >= 12;
+  });
+  meta.summary = compactLine(summaryCandidates[0] || '', 220);
+
+  if (!meta.summary && meta.rawHeading) meta.summary = meta.rawHeading;
+  return meta;
+}
+
+function renderTaskMetaBadges(task, meta = parseTaskNotes(task)) {
+  const badges = [];
+  if (meta.resultStatus) badges.push(Badge({ text: meta.resultStatus, color: taskStatusColor(meta.resultStatus), variant: 'subtle' }));
+  if (meta.filesText) badges.push(Badge({ text: meta.filesText, color: 'var(--brand-cyan)', variant: 'subtle' }));
+  else if (meta.files.length) badges.push(Badge({ text: `${meta.files.length} file${meta.files.length === 1 ? '' : 's'}`, color: 'var(--brand-cyan)', variant: 'subtle' }));
+  if (meta.testsText) badges.push(Badge({ text: meta.testsText, color: /fail|error|block|skip|not run/i.test(meta.testsText) ? 'var(--brand-amber)' : 'var(--brand-mint)', variant: 'subtle' }));
+  if (meta.blockers.length && !/fail|block|error|timeout/i.test(meta.resultStatus)) badges.push(Badge({ text: 'warnings', color: 'var(--brand-amber)', variant: 'subtle' }));
+  return badges.length ? `<div class="task-meta-row">${badges.join('')}</div>` : '';
+}
+
+function renderTaskFileChips(files) {
+  if (!files || !files.length) return '';
+  return `<div class="task-file-list">${files.slice(0, 4).map(file => `<span class="task-file-chip" title="${escapeAttr(file)}">${escapeHtml(file.split('/').slice(-2).join('/'))}</span>`).join('')}</div>`;
+}
+
+function renderTaskStructuredSummary(task, meta = parseTaskNotes(task)) {
+  const status = meta.resultStatus || task.status || 'pending';
+  const files = meta.filesText || (meta.files.length ? `${meta.files.length} detected` : '—');
+  const tests = meta.testsText || '—';
+  const summary = meta.summary || 'No worker summary yet.';
+  const blockers = meta.blockers.length ? `<div style="margin-top:var(--space-3);"><div class="section-eyebrow">WARNINGS / ERRORS</div>${meta.blockers.map(b => `<div style="font:400 var(--font-size-xs) var(--font-mono);color:var(--brand-amber);margin-top:4px;">${escapeHtml(b)}</div>`).join('')}</div>` : '';
+  return `<div class="task-structured-summary">
+    <div class="section-eyebrow">EXECUTION SUMMARY</div>
+    <div style="font:400 var(--font-size-sm) var(--font-mono);color:var(--text-muted);line-height:1.55;">${escapeHtml(summary)}</div>
+    <div class="task-summary-grid">
+      <div class="task-summary-cell"><span>Status</span><strong style="color:${taskStatusColor(status)};">${escapeHtml(status)}</strong></div>
+      <div class="task-summary-cell"><span>Files</span><strong>${escapeHtml(files)}</strong></div>
+      <div class="task-summary-cell"><span>Tests</span><strong>${escapeHtml(tests)}</strong></div>
+    </div>
+    ${renderTaskFileChips(meta.files)}
+    ${blockers}
+  </div>`;
+}
+
 function renderTaskBoard() {
   const cols = ['pending', 'in_progress', 'review'];
   const labels = ['Pending', 'In Progress', 'Review'];
@@ -1799,7 +1945,8 @@ function renderTaskBoard() {
     const cards = tasks.map((t, ti) => {
       const title = escapeHtml(t.title || 'Untitled task');
       const priority = escapeHtml(t.priority || 'medium');
-      const notePreview = t.notes ? escapeHtml(t.notes.length > 200 ? t.notes.substring(0, 200) + '…' : t.notes) : '';
+      const meta = parseTaskNotes(t);
+      const summary = meta.summary ? escapeHtml(meta.summary) : '';
       const depCount = (t.depends_on || []).length;
       return `
       <div class="task-card dissolve-in" style="${staggerDelay(ti)}">
@@ -1811,7 +1958,9 @@ function renderTaskBoard() {
           ${t.blocked ? '<span class="blocked-chip">Blocked</span>' : ''}
           ${depCount ? Badge({ text: `${depCount} dep${depCount === 1 ? '' : 's'}`, color: 'var(--brand-amber)', variant: 'subtle' }) : ''}
         </div>
-        ${notePreview ? `<div class="task-notes">${notePreview}</div>` : ''}
+        ${renderTaskMetaBadges(t, meta)}
+        ${summary ? `<div class="task-summary">${summary}</div>` : ''}
+        ${renderTaskFileChips(meta.files)}
         <div class="task-footer">
           <span class="task-time">${relativeTime(t.created_at)}</span>
           <div class="task-actions">
@@ -1935,6 +2084,7 @@ window.createFollowUpTask = async function(parentId) {
 window.openReviewDrawer = function(taskId) {
   const task = getTask(taskId);
   if (!task) return;
+  const meta = parseTaskNotes(task);
   const deps = task.depends_on || [];
   const depHtml = deps.length ? deps.map(depId => {
     const dep = getTask(depId);
@@ -1954,6 +2104,7 @@ window.openReviewDrawer = function(taskId) {
           ${Badge({ text: task.status || 'pending', color: task.status === 'review' ? 'var(--brand-mint)' : 'var(--brand-cyan)', variant: 'subtle' })}
           ${Badge({ text: task.priority || 'medium', color: task.priority === 'high' ? 'var(--brand-red)' : 'var(--brand-amber)', variant: 'subtle' })}
           ${task.blocked ? '<span class="blocked-chip">Blocked</span>' : ''}
+          ${renderTaskMetaBadges(task, meta)}
         </div>
       </div>
       <button class="btn-secondary" onclick="closeReviewDrawer()">Close</button>
@@ -1967,6 +2118,8 @@ window.openReviewDrawer = function(taskId) {
       ${task.status === 'review' ? `<button class="btn-primary" onclick="deleteTask('${escapeAttr(task.id)}')">Clear Review</button>` : ''}
     </div>
 
+    ${renderTaskStructuredSummary(task, meta)}
+
     <div style="margin:var(--space-4) 0;">
       <div class="section-eyebrow">DEPENDENCIES</div>
       ${depHtml}
@@ -1974,7 +2127,7 @@ window.openReviewDrawer = function(taskId) {
     </div>
 
     <div style="margin:var(--space-4) 0;">
-      <div class="section-eyebrow">WORKER NOTES</div>
+      <div class="section-eyebrow">RAW WORKER NOTES</div>
       <pre>${escapeHtml(task.notes || 'No notes yet.')}</pre>
     </div>
 
