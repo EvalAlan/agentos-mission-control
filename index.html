@@ -522,6 +522,62 @@
       box-shadow: 0 0 0 3px rgba(139,92,246,0.1);
     }
 
+    .hermes-chat-shell {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 320px;
+      gap: var(--space-4);
+      align-items: stretch;
+    }
+    .hermes-chat-main, .hermes-chat-side {
+      padding: var(--space-4);
+      min-height: 520px;
+    }
+    .hermes-chat-log {
+      height: 420px;
+      overflow: auto;
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-3);
+      padding-right: var(--space-1);
+      margin-bottom: var(--space-3);
+    }
+    .hermes-chat-message {
+      border: 1px solid rgba(255,255,255,0.07);
+      border-radius: var(--radius-lg);
+      padding: var(--space-3);
+      background: rgba(255,255,255,0.035);
+    }
+    .hermes-chat-message.user { border-color: rgba(125,211,252,0.22); background: rgba(125,211,252,0.055); }
+    .hermes-chat-message.assistant { border-color: rgba(139,92,246,0.22); background: rgba(139,92,246,0.055); }
+    .hermes-chat-role {
+      font: 600 var(--font-size-xs) var(--font-mono);
+      letter-spacing: var(--letter-spacing-wide);
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin-bottom: var(--space-2);
+    }
+    .hermes-chat-text {
+      white-space: pre-wrap;
+      font: 400 var(--font-size-sm)/1.6 var(--font-mono);
+      color: var(--text-primary);
+    }
+    .hermes-chat-compose textarea {
+      width: 100%; min-height: 120px; resize: vertical;
+      background: rgba(0,0,0,0.35);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: var(--radius-md);
+      color: var(--text-primary);
+      font: 400 var(--font-size-sm) var(--font-mono);
+      padding: var(--space-3);
+      margin-bottom: var(--space-2);
+    }
+    .hermes-chat-compose textarea:focus { outline: none; border-color: rgba(125,211,252,0.38); box-shadow: 0 0 0 3px rgba(125,211,252,0.09); }
+    .hermes-chat-meta {
+      font: 400 var(--font-size-xs) var(--font-mono);
+      color: var(--text-muted);
+      line-height: 1.6;
+    }
+
     .btn-primary {
       background: linear-gradient(135deg, #8B5CF6, #A78BFA);
       color: white; border: none;
@@ -779,6 +835,8 @@
       .grid-4 { grid-template-columns: repeat(2, 1fr); }
       .grid-tasks { grid-template-columns: 1fr; }
       .tasks-console { grid-template-columns: 1fr; }
+      .hermes-chat-shell { grid-template-columns: 1fr; }
+      .hermes-chat-main, .hermes-chat-side { min-height: auto; }
       .worker-split { grid-template-columns: 1fr; }
       .worker-log-pre { max-height: 220px; }
       .content-layout { grid-template-columns: 1fr; }
@@ -913,6 +971,7 @@
     <button class="nav-tab active" data-tab="overview">Overview</button>
     <button class="nav-tab" data-tab="agents">Workspaces</button>
     <button class="nav-tab" data-tab="tasks">Tasks</button>
+    <button class="nav-tab" data-tab="chat">Chat</button>
     <button class="nav-tab" data-tab="schedule">Schedule</button>
     <button class="nav-tab" data-tab="content">Content</button>
   </div>
@@ -1003,6 +1062,40 @@
         <div id="taskBoardControls"></div>
       </div>
       <div class="grid-tasks" id="taskBoard"></div>
+    </div>
+  </div>
+
+  <!-- CHAT TAB -->
+  <div class="tab-panel" id="tab-chat">
+    <div class="section-eyebrow">HERMES INTERFACE</div>
+    <div class="section-heading">Chat with Hermes</div>
+    <div class="hermes-chat-shell">
+      <section class="glass-card hermes-chat-main glow-cyan">
+        <div class="scan-line"></div>
+        <div id="hermesChatLog" class="hermes-chat-log">
+          <div class="empty-state">Ask Hermes something. This runs <code>hermes chat -q</code> on docker01, so don't mash Enter like it's IRC in 1998.</div>
+        </div>
+        <form class="hermes-chat-compose" id="hermesChatForm">
+          <textarea id="hermesPrompt" placeholder="Ask Hermes to inspect repos, explain state, draft a task, or run a bounded operation..."></textarea>
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:var(--space-3);flex-wrap:wrap;">
+            <div class="hermes-chat-meta" id="hermesChatStatus">Ready · one-shot dashboard session</div>
+            <div style="display:flex;gap:var(--space-2);">
+              <button class="btn-secondary" type="button" onclick="clearHermesChat()">Clear</button>
+              <button class="btn-primary" id="hermesSendBtn" type="submit">Send</button>
+            </div>
+          </div>
+        </form>
+      </section>
+      <aside class="glass-card hermes-chat-side">
+        <div class="section-eyebrow">Execution model</div>
+        <div class="hermes-chat-meta">
+          <p><strong style="color:var(--text-primary);">Mode:</strong> one-shot <code>hermes chat -q</code></p>
+          <p><strong style="color:var(--text-primary);">Source:</strong> <code>agentos-dashboard</code></p>
+          <p><strong style="color:var(--text-primary);">Timeout:</strong> 240s default, capped at 600s</p>
+          <p><strong style="color:var(--text-primary);">Persistence:</strong> Hermes records normal session history; this UI keeps only the visible browser transcript.</p>
+          <p style="margin-top:var(--space-3);color:var(--brand-amber);">This is not a streaming terminal yet. Long tool-heavy requests will sit there until Hermes finishes. Primitive, but real.</p>
+        </div>
+      </aside>
     </div>
   </div>
 
@@ -2458,6 +2551,96 @@ window.saveContent = async function() {
   showViewMode();
   loadContentDocs();
 };
+
+// ══════════════════════════════════════════════════════════════
+// HERMES CHAT TAB
+// ══════════════════════════════════════════════════════════════
+let hermesChatHistory = [];
+let hermesChatBusy = false;
+
+function renderHermesChat() {
+  const log = document.getElementById('hermesChatLog');
+  if (!log) return;
+  if (!hermesChatHistory.length) {
+    log.innerHTML = '<div class="empty-state">Ask Hermes something. This runs <code>hermes chat -q</code> on docker01, so don\'t mash Enter like it\'s IRC in 1998.</div>';
+    return;
+  }
+  log.innerHTML = hermesChatHistory.map((m) => `
+    <div class="hermes-chat-message ${m.role}">
+      <div class="hermes-chat-role">${m.role === 'user' ? 'Alan' : 'Hermes'}${m.meta ? ` · ${escapeHtml(m.meta)}` : ''}</div>
+      <div class="hermes-chat-text">${escapeHtml(m.text || '')}</div>
+    </div>
+  `).join('');
+  log.scrollTop = log.scrollHeight;
+}
+
+function setHermesChatBusy(busy, status = '') {
+  hermesChatBusy = busy;
+  const btn = document.getElementById('hermesSendBtn');
+  const prompt = document.getElementById('hermesPrompt');
+  const statusEl = document.getElementById('hermesChatStatus');
+  if (btn) {
+    btn.disabled = busy;
+    btn.textContent = busy ? 'Running…' : 'Send';
+  }
+  if (prompt) prompt.disabled = busy;
+  if (statusEl) statusEl.textContent = status || (busy ? 'Hermes is working…' : 'Ready · one-shot dashboard session');
+}
+
+window.clearHermesChat = function() {
+  if (hermesChatBusy) return;
+  hermesChatHistory = [];
+  renderHermesChat();
+  setHermesChatBusy(false);
+};
+
+window.sendHermesChat = async function() {
+  if (hermesChatBusy) return;
+  const input = document.getElementById('hermesPrompt');
+  const prompt = (input?.value || '').trim();
+  if (!prompt) return;
+  hermesChatHistory.push({ role: 'user', text: prompt });
+  input.value = '';
+  renderHermesChat();
+  setHermesChatBusy(true, 'Hermes is running tools if it needs them. This request is blocking, not streaming.');
+  try {
+    const res = await fetch('api/hermes/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt, timeout: 240 }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) {
+      const details = [data.error || `HTTP ${res.status}`, data.stderr || ''].filter(Boolean).join('\n');
+      hermesChatHistory.push({ role: 'assistant', text: details || 'Hermes failed without returning useful error text.', meta: 'error' });
+      setHermesChatBusy(false, `Error · exit ${data.exit_code ?? res.status}`);
+    } else {
+      hermesChatHistory.push({ role: 'assistant', text: data.response || '(no output)', meta: `${data.elapsed_seconds || 0}s` });
+      setHermesChatBusy(false, `Done · ${data.elapsed_seconds || 0}s`);
+    }
+  } catch (e) {
+    hermesChatHistory.push({ role: 'assistant', text: String(e), meta: 'network error' });
+    setHermesChatBusy(false, 'Network error talking to dashboard backend');
+  }
+  renderHermesChat();
+};
+
+const hermesChatForm = document.getElementById('hermesChatForm');
+if (hermesChatForm) {
+  hermesChatForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    window.sendHermesChat();
+  });
+}
+const hermesPrompt = document.getElementById('hermesPrompt');
+if (hermesPrompt) {
+  hermesPrompt.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      e.preventDefault();
+      window.sendHermesChat();
+    }
+  });
+}
 
 // ══════════════════════════════════════════════════════════════
 // SSE / POLLING

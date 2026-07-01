@@ -208,6 +208,53 @@ def worker_log_tail(lines=120):
     }
 
 
+def run_hermes_chat(prompt, timeout=240):
+    prompt = str(prompt or "").strip()
+    if not prompt:
+        return {"ok": False, "error": "Prompt is empty"}
+    if len(prompt) > 12000:
+        return {"ok": False, "error": "Prompt too long; keep dashboard chat under 12k chars"}
+    try:
+        timeout = max(30, min(int(timeout or 240), 600))
+    except Exception:
+        timeout = 240
+
+    started = time.time()
+    env = os.environ.copy()
+    env["HERMES_HOME"] = HERMES_HOME
+    try:
+        proc = subprocess.run(
+            ["hermes", "chat", "-Q", "--source", "agentos-dashboard", "-q", prompt],
+            cwd=os.path.expanduser("~"),
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": f"Hermes timed out after {timeout}s"}
+    except FileNotFoundError:
+        return {"ok": False, "error": "hermes CLI not found in dashboard server PATH"}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+    output = (proc.stdout or "").strip()
+    error = (proc.stderr or "").strip()
+    if len(output) > 24000:
+        output = output[-24000:]
+    if len(error) > 4000:
+        error = error[-4000:]
+    return {
+        "ok": proc.returncode == 0,
+        "response": output,
+        "stderr": error,
+        "exit_code": proc.returncode,
+        "elapsed_seconds": round(time.time() - started, 1),
+    }
+
+
 def reset_stale_task(task_id):
     if not task_id:
         return {"ok": False, "error": "Missing task id"}
@@ -1347,6 +1394,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
         elif path == "/api/worker/reset-task":
             self.send_json(reset_stale_task(body.get("id", "")))
+
+        elif path == "/api/hermes/chat":
+            self.send_json(run_hermes_chat(body.get("prompt", ""), body.get("timeout", 240)))
 
         elif path == "/api/cron/remove":
             job_id = body.get("id", "")
