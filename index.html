@@ -561,17 +561,67 @@
       font: 400 var(--font-size-sm)/1.6 var(--font-mono);
       color: var(--text-primary);
     }
-    .hermes-chat-compose textarea {
-      width: 100%; min-height: 120px; resize: vertical;
-      background: rgba(0,0,0,0.35);
+    .hermes-chat-composer {
+      display: flex;
+      align-items: flex-end;
+      gap: var(--space-2);
+      padding: var(--space-2);
+      background: rgba(0,0,0,0.32);
       border: 1px solid rgba(255,255,255,0.08);
-      border-radius: var(--radius-md);
-      color: var(--text-primary);
-      font: 400 var(--font-size-sm) var(--font-mono);
-      padding: var(--space-3);
+      border-radius: var(--radius-lg);
       margin-bottom: var(--space-2);
     }
-    .hermes-chat-compose textarea:focus { outline: none; border-color: rgba(125,211,252,0.38); box-shadow: 0 0 0 3px rgba(125,211,252,0.09); }
+    .hermes-attach-btn, .hermes-send-icon {
+      width: 38px; height: 38px; flex: 0 0 auto;
+      display: inline-flex; align-items: center; justify-content: center;
+      border-radius: var(--radius-full);
+      font: 700 20px var(--font-mono);
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .hermes-attach-btn {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.10);
+      color: var(--text-muted);
+    }
+    .hermes-attach-btn:hover { color: var(--text-primary); background: rgba(255,255,255,0.09); }
+    .hermes-send-icon {
+      border: none;
+      background: linear-gradient(135deg, #8B5CF6, #A78BFA);
+      color: white;
+      box-shadow: 0 4px 16px rgba(139,92,246,0.28);
+      font-size: 15px;
+    }
+    .hermes-send-icon:disabled, .hermes-attach-btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+    .hermes-chat-compose textarea {
+      width: 100%; min-height: 24px; max-height: 180px; resize: none;
+      background: transparent;
+      border: none;
+      color: var(--text-primary);
+      font: 400 var(--font-size-sm)/1.45 var(--font-mono);
+      padding: 8px 2px;
+      overflow-y: hidden;
+    }
+    .hermes-chat-compose textarea:focus { outline: none; }
+    .hermes-attachment-row {
+      display: flex; gap: 6px; flex-wrap: wrap;
+      margin: 0 0 var(--space-2) 0;
+    }
+    .hermes-attachment-chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      max-width: 260px;
+      padding: 5px 8px;
+      border-radius: var(--radius-full);
+      background: rgba(125,211,252,0.08);
+      border: 1px solid rgba(125,211,252,0.16);
+      color: var(--brand-cyan);
+      font: 500 11px var(--font-mono);
+    }
+    .hermes-attachment-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .hermes-attachment-chip button {
+      border: none; background: transparent; color: currentColor;
+      cursor: pointer; font: 700 13px var(--font-mono); padding: 0;
+    }
     .hermes-chat-meta {
       font: 400 var(--font-size-xs) var(--font-mono);
       color: var(--text-muted);
@@ -1076,13 +1126,16 @@
           <div class="empty-state">Ask Hermes something. This runs <code>hermes chat -q</code> on docker01, so don't mash Enter like it's IRC in 1998.</div>
         </div>
         <form class="hermes-chat-compose" id="hermesChatForm">
-          <textarea id="hermesPrompt" placeholder="Ask Hermes to inspect repos, explain state, draft a task, or run a bounded operation..."></textarea>
+          <div class="hermes-attachment-row" id="hermesAttachmentRow"></div>
+          <div class="hermes-chat-composer">
+            <button class="hermes-attach-btn" id="hermesAttachBtn" type="button" title="Add attachments">+</button>
+            <input id="hermesAttachmentInput" type="file" multiple style="display:none;">
+            <textarea id="hermesPrompt" rows="1" placeholder="Message Hermes..."></textarea>
+            <button class="hermes-send-icon" id="hermesSendBtn" type="submit" title="Send">➤</button>
+          </div>
           <div style="display:flex;justify-content:space-between;align-items:center;gap:var(--space-3);flex-wrap:wrap;">
-            <div class="hermes-chat-meta" id="hermesChatStatus">Ready · one-shot dashboard session</div>
-            <div style="display:flex;gap:var(--space-2);">
-              <button class="btn-secondary" type="button" onclick="clearHermesChat()">Clear</button>
-              <button class="btn-primary" id="hermesSendBtn" type="submit">Send</button>
-            </div>
+            <div class="hermes-chat-meta" id="hermesChatStatus">Ready · Enter sends · Shift+Enter adds a line</div>
+            <div class="hermes-chat-meta">Text attachments are embedded as context. Binary files are listed, not read. Yet.</div>
           </div>
         </form>
       </section>
@@ -2557,12 +2610,48 @@ window.saveContent = async function() {
 // ══════════════════════════════════════════════════════════════
 let hermesChatHistory = [];
 let hermesChatBusy = false;
+let hermesAttachments = [];
+
+function resetHermesTextarea() {
+  const input = document.getElementById('hermesPrompt');
+  if (!input) return;
+  input.style.height = 'auto';
+  input.style.height = `${Math.min(input.scrollHeight, 180)}px`;
+  input.style.overflowY = input.scrollHeight > 180 ? 'auto' : 'hidden';
+}
+
+function renderHermesAttachments() {
+  const row = document.getElementById('hermesAttachmentRow');
+  if (!row) return;
+  row.innerHTML = hermesAttachments.map((a, i) => `
+    <div class="hermes-attachment-chip" title="${escapeAttr(a.name)} · ${formatBytes(a.size || 0)}">
+      <span>${escapeHtml(a.name)}</span>
+      <small>${escapeHtml(formatBytes(a.size || 0))}</small>
+      <button type="button" onclick="removeHermesAttachment(${i})" aria-label="Remove attachment">×</button>
+    </div>
+  `).join('');
+}
+
+window.removeHermesAttachment = function(index) {
+  hermesAttachments.splice(index, 1);
+  renderHermesAttachments();
+};
+
+function attachmentTextForPrompt() {
+  if (!hermesAttachments.length) return '';
+  const blocks = hermesAttachments.map((a) => {
+    const header = `Attachment: ${a.name} (${a.type || 'unknown'}, ${formatBytes(a.size || 0)})`;
+    if (a.text) return `--- ${header} ---\n${a.text}\n--- end ${a.name} ---`;
+    return `--- ${header} ---\n[Binary or unsupported file; content not embedded by dashboard yet.]`;
+  });
+  return `\n\nATTACHMENTS:\n${blocks.join('\n\n')}`;
+}
 
 function renderHermesChat() {
   const log = document.getElementById('hermesChatLog');
   if (!log) return;
   if (!hermesChatHistory.length) {
-    log.innerHTML = '<div class="empty-state">Ask Hermes something. This runs <code>hermes chat -q</code> on docker01, so don\'t mash Enter like it\'s IRC in 1998.</div>';
+    log.innerHTML = '<div class="empty-state">Ask Hermes something. This runs <code>hermes chat -q</code> on docker01. Enter sends; Shift+Enter gives you a newline. Civilized.</div>';
     return;
   }
   log.innerHTML = hermesChatHistory.map((m) => `
@@ -2578,31 +2667,39 @@ function setHermesChatBusy(busy, status = '') {
   hermesChatBusy = busy;
   const btn = document.getElementById('hermesSendBtn');
   const prompt = document.getElementById('hermesPrompt');
+  const attach = document.getElementById('hermesAttachBtn');
   const statusEl = document.getElementById('hermesChatStatus');
-  if (btn) {
-    btn.disabled = busy;
-    btn.textContent = busy ? 'Running…' : 'Send';
-  }
+  if (btn) btn.disabled = busy;
   if (prompt) prompt.disabled = busy;
-  if (statusEl) statusEl.textContent = status || (busy ? 'Hermes is working…' : 'Ready · one-shot dashboard session');
+  if (attach) attach.disabled = busy;
+  if (statusEl) statusEl.textContent = status || (busy ? 'Hermes is working…' : 'Ready · Enter sends · Shift+Enter adds a line');
 }
 
 window.clearHermesChat = function() {
   if (hermesChatBusy) return;
   hermesChatHistory = [];
+  hermesAttachments = [];
   renderHermesChat();
+  renderHermesAttachments();
   setHermesChatBusy(false);
 };
 
 window.sendHermesChat = async function() {
   if (hermesChatBusy) return;
   const input = document.getElementById('hermesPrompt');
-  const prompt = (input?.value || '').trim();
-  if (!prompt) return;
-  hermesChatHistory.push({ role: 'user', text: prompt });
-  input.value = '';
+  const rawPrompt = (input?.value || '').trim();
+  if (!rawPrompt && !hermesAttachments.length) return;
+  const attachmentSummary = hermesAttachments.length ? `\n\n[${hermesAttachments.length} attachment${hermesAttachments.length === 1 ? '' : 's'}: ${hermesAttachments.map(a => a.name).join(', ')}]` : '';
+  const prompt = `${rawPrompt}${attachmentTextForPrompt()}`.trim();
+  hermesChatHistory.push({ role: 'user', text: `${rawPrompt || '(attachments only)'}${attachmentSummary}` });
+  if (input) {
+    input.value = '';
+    resetHermesTextarea();
+  }
+  hermesAttachments = [];
+  renderHermesAttachments();
   renderHermesChat();
-  setHermesChatBusy(true, 'Hermes is running tools if it needs them. This request is blocking, not streaming.');
+  setHermesChatBusy(true, 'Hermes is running. Still blocking, because streaming is the next plumbing job.');
   try {
     const res = await fetch('api/hermes/chat', {
       method: 'POST',
@@ -2634,11 +2731,32 @@ if (hermesChatForm) {
 }
 const hermesPrompt = document.getElementById('hermesPrompt');
 if (hermesPrompt) {
+  resetHermesTextarea();
+  hermesPrompt.addEventListener('input', resetHermesTextarea);
   hermesPrompt.addEventListener('keydown', (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+    if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       window.sendHermesChat();
     }
+  });
+}
+const hermesAttachBtn = document.getElementById('hermesAttachBtn');
+const hermesAttachmentInput = document.getElementById('hermesAttachmentInput');
+if (hermesAttachBtn && hermesAttachmentInput) {
+  hermesAttachBtn.addEventListener('click', () => hermesAttachmentInput.click());
+  hermesAttachmentInput.addEventListener('change', async () => {
+    const files = Array.from(hermesAttachmentInput.files || []);
+    for (const file of files) {
+      const item = { name: file.name, size: file.size, type: file.type || 'unknown', text: '' };
+      const isText = file.type.startsWith('text/') || /\.(md|txt|json|ya?ml|csv|log|py|js|ts|go|rs|html|css)$/i.test(file.name);
+      if (isText && file.size <= 65536) {
+        try { item.text = await file.text(); }
+        catch (_) { item.text = ''; }
+      }
+      hermesAttachments.push(item);
+    }
+    hermesAttachmentInput.value = '';
+    renderHermesAttachments();
   });
 }
 
