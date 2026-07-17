@@ -215,6 +215,62 @@ agentos-mission-control/
 
 ---
 
+## ✦ Multi-Agent Updates
+
+Hermes, Claude Code, and other agents can report status, task context, and usage to the dashboard through an authenticated tailnet endpoint:
+
+```text
+POST /api/agents/update
+Authorization: Bearer $AGENTOS_INGEST_TOKEN
+Content-Type: application/json
+```
+
+Example payload:
+
+```json
+{
+  "event_id": "session-123:final",
+  "agent_id": "claude-code:mercury",
+  "agent_name": "Claude Code on mercury",
+  "agent_type": "claude-code",
+  "event_type": "usage",
+  "status": "completed",
+  "task": "Implement the ingestion API",
+  "model": "claude-sonnet-4-6",
+  "session_id": "session-123",
+  "usage": {
+    "input_tokens": 1200,
+    "output_tokens": 340,
+    "cache_read_tokens": 800,
+    "cache_creation_tokens": 100,
+    "cost_usd": 0.12,
+    "turns": 8,
+    "duration_ms": 42000
+  },
+  "metadata": {"repo": "agentos-mission-control"}
+}
+```
+
+`event_id` is idempotent: retrying the same update does not double-count usage. Read current state at `GET /api/agents`; the same data is included in `GET /api/snapshot` under `external_agents`.
+
+The stdlib-only client handles both generic updates and Claude Code JSON results:
+
+```bash
+export AGENTOS_INGEST_TOKEN='...'
+python3 scripts/report_agent_update.py \
+  --agent-id "hermes:docker01" --agent-name "Hermes docker01" \
+  --status running --task "Working on dashboard ingestion"
+
+claude -p "Do the task" --output-format json > /tmp/claude-result.json
+python3 scripts/report_agent_update.py \
+  --agent-id "claude-code:mercury" --agent-name "Claude Code mercury" \
+  --task "Do the task" --claude-result /tmp/claude-result.json
+```
+
+The server refuses writes when `AGENTOS_INGEST_TOKEN` is unset. Keep the token in a mode-0600 environment file; do not commit it or embed it in skills.
+
+---
+
 ## ✦ Activity Logging
 
 Every agent action is logged to SQLite with timestamp, model, and status.

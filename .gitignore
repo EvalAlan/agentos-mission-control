@@ -4,4 +4,5 @@ agentos-task-worker.log
 __pycache__/
 *.pyc
 board.db
+agent-updates.db
 backups/

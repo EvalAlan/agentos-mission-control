@@ -555,6 +555,7 @@
     }
     .hermes-chat-message.user { border-color: rgba(125,211,252,0.22); background: rgba(125,211,252,0.055); }
     .hermes-chat-message.assistant { border-color: rgba(139,92,246,0.22); background: rgba(139,92,246,0.055); }
+    .hermes-chat-message.streaming { border-color: rgba(52,211,153,0.35); }
     .hermes-chat-role {
       font: 600 var(--font-size-xs) var(--font-mono);
       letter-spacing: var(--letter-spacing-wide);
@@ -1074,6 +1075,14 @@
       <div id="agentCounts"></div>
     </div>
     <div class="workspace-lane-grid" id="agentCards" style="margin-bottom:var(--space-4);"></div>
+    <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:var(--space-3);">
+      <div>
+        <div class="section-eyebrow">EXTERNAL AGENTS</div>
+        <div style="font:400 var(--font-size-sm) var(--font-mono);color:var(--text-muted);">Hermes, Claude Code, and other clients reporting over the tailnet.</div>
+      </div>
+      <div id="externalAgentSummary"></div>
+    </div>
+    <div class="workspace-lane-grid" id="externalAgentCards" style="margin-bottom:var(--space-4);"></div>
     <div class="filter-row" id="logFilters"></div>
     <div class="glass-card" style="padding: var(--space-4); max-height: 420px; overflow-y: auto; position: relative;">
       <div class="scan-line" style="animation-duration:10s;"></div>
@@ -1129,7 +1138,7 @@
       <section class="glass-card hermes-chat-main glow-cyan">
         <div class="scan-line"></div>
         <div id="hermesChatLog" class="hermes-chat-log">
-          <div class="empty-state">Ask Hermes something. This runs <code>hermes chat -q</code> on docker01, so don't mash Enter like it's IRC in 1998.</div>
+          <div class="empty-state">Ask Hermes something. Tool activity streams live from docker01; the final answer lands when the model finishes.</div>
         </div>
         <form class="hermes-chat-compose" id="hermesChatForm">
           <div class="hermes-attachment-row" id="hermesAttachmentRow"></div>
@@ -1148,11 +1157,12 @@
       <aside class="glass-card hermes-chat-side">
         <div class="section-eyebrow">Execution model</div>
         <div class="hermes-chat-meta">
-          <p><strong style="color:var(--text-primary);">Mode:</strong> one-shot <code>hermes chat -q</code></p>
+          <p><strong style="color:var(--text-primary);">Mode:</strong> streamed execution feed</p>
           <p><strong style="color:var(--text-primary);">Source:</strong> <code>agentos-dashboard</code></p>
+          <p><strong style="color:var(--text-primary);">Model:</strong> <code>openai-codex / gpt-5.6-sol</code></p>
           <p><strong style="color:var(--text-primary);">Timeout:</strong> 240s default, capped at 600s</p>
           <p><strong style="color:var(--text-primary);">Persistence:</strong> Hermes records normal session history; this UI keeps only the visible browser transcript.</p>
-          <p style="margin-top:var(--space-3);color:var(--brand-amber);">This is not a streaming terminal yet. Long tool-heavy requests will sit there until Hermes finishes. Primitive, but real.</p>
+          <p style="margin-top:var(--space-3);color:var(--brand-amber);">Tool calls and retries stream live. Hermes' CLI still emits the answer as one final block; this UI does not pretend otherwise.</p>
         </div>
       </aside>
     </div>
@@ -1727,6 +1737,41 @@ function renderAgents(d) {
     </div>`;
   }).join('');
 
+  const external = d.external_agents || {};
+  const externalAgents = external.agents || [];
+  const externalUsage = external.usage || {};
+  const externalActive = externalAgents.filter(a => a.active).length;
+  document.getElementById('externalAgentSummary').innerHTML = GlassCard({
+    children: `<div style="display:flex;gap:var(--space-4);">
+      <div style="text-align:center;"><div style="font:700 var(--font-size-lg) var(--font-mono);color:var(--status-active);">${externalActive}</div><div style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);">Live</div></div>
+      <div style="text-align:center;"><div style="font:700 var(--font-size-lg) var(--font-mono);color:var(--brand-cyan);">${externalAgents.length}</div><div style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);">Known</div></div>
+      <div style="text-align:center;"><div style="font:700 var(--font-size-lg) var(--font-mono);color:var(--brand-gold);">${Number(externalUsage.input_tokens || 0) + Number(externalUsage.output_tokens || 0)}</div><div style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);">Tokens</div></div>
+      <div style="text-align:center;"><div style="font:700 var(--font-size-lg) var(--font-mono);color:var(--brand-violet);">$${Number(externalUsage.cost_usd || 0).toFixed(3)}</div><div style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);">Reported</div></div>
+    </div>`,
+    style: 'padding:var(--space-3);'
+  });
+  const externalGrid = document.getElementById('externalAgentCards');
+  externalGrid.style.gridTemplateColumns = `repeat(${balancedGridColumns(externalAgents.length, { max: 4, mobile: 1 })}, minmax(0, 1fr))`;
+  externalGrid.innerHTML = externalAgents.length ? externalAgents.map((agent, idx) => {
+    const color = agent.active ? 'var(--status-active)' : (agent.status === 'error' || agent.status === 'failed' ? 'var(--status-error)' : palette[idx % palette.length]);
+    const reported = agent.received_at ? relativeUnix(Date.parse(agent.received_at)) : 'never';
+    const tokens = Number(agent.input_tokens || 0) + Number(agent.output_tokens || 0);
+    return `<div class="agent-card dissolve-in" style="--agent-color:${color};${staggerDelay(idx)}">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-2);">
+        ${Badge({ text: escapeHtml(agent.agent_type || 'agent').toUpperCase(), color, variant: 'solid' })}
+        <span style="font:500 var(--font-size-xs) var(--font-mono);color:${color};">${escapeHtml(agent.status || 'unknown')}</span>
+      </div>
+      <div style="font:500 var(--font-size-lg) var(--font-display);">${escapeHtml(agent.agent_name || agent.agent_id)}</div>
+      <div style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);margin-top:3px;">${escapeHtml(agent.agent_id)}</div>
+      <div style="font:400 var(--font-size-sm) var(--font-mono);color:var(--text-primary);margin-top:var(--space-2);min-height:36px;">${escapeHtml(agent.task || 'Heartbeat')}</div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-2);margin-top:var(--space-3);">
+        <div><div style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);">Model</div><div style="font:500 var(--font-size-xs) var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeAttr(agent.model || '')}">${escapeHtml(agent.model || '—')}</div></div>
+        <div><div style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);">Tokens</div><div style="font:500 var(--font-size-sm) var(--font-mono);">${tokens.toLocaleString()}</div></div>
+        <div><div style="font:400 var(--font-size-xs) var(--font-mono);color:var(--text-muted);">Last</div><div style="font:500 var(--font-size-xs) var(--font-mono);">${reported}</div></div>
+      </div>
+    </div>`;
+  }).join('') : '<div class="glass-card empty-state" style="padding:var(--space-4);">No external agents have reported yet.</div>';
+
   const filters = ['ALL', ...workspaces.map(w => w.label || w.key.toUpperCase())];
   document.getElementById('logFilters').innerHTML = filters.map((name, i) => {
     const filter = i === 0 ? 'all' : workspaces[i-1].key;
@@ -2106,7 +2151,7 @@ function parseReviewHistory(task) {
 
   history.sort((a, b) => (b.time?.getTime() || 0) - (a.time?.getTime() || 0));
 
-  const summaries = [...notes.matchAll(/WORKER\s+(COMPLETED|FAILED|BLOCKED)([^\n]*)\s+at\s+[0-9TZ:._+-]+:\n([\s\S]*?)(?=\n\n(?:AGENTOS_|WORKER\s+(?:COMPLETED|FAILED|BLOCKED)|$))/gi)];
+  const summaries = [...notes.matchAll(/WORKER\s+(COMPLETED|FAILED|BLOCKED)([^\n]*)\s+at\s+[0-9TZ:._+-]+:\n([\s\S]*?)(?=(?:\n\n(?:AGENTOS_|WORKER\s+(?:COMPLETED|FAILED|BLOCKED)))|$)/gi)];
   if (summaries.length) {
     const latest = summaries[summaries.length - 1];
     const body = (latest[3] || '').trim();
@@ -2873,7 +2918,7 @@ function renderHermesChat() {
     return;
   }
   log.innerHTML = hermesChatHistory.map((m) => `
-    <div class="hermes-chat-message ${m.role}">
+    <div class="hermes-chat-message ${m.role} ${m.streaming ? 'streaming' : ''}">
       <div class="hermes-chat-role">${m.role === 'user' ? 'Alan' : 'Hermes'}${m.meta ? ` · ${escapeHtml(m.meta)}` : ''}</div>
       <div class="hermes-chat-text">${escapeHtml(m.text || '')}</div>
     </div>
@@ -2910,6 +2955,8 @@ window.sendHermesChat = async function() {
   const attachmentSummary = hermesAttachments.length ? `\n\n[${hermesAttachments.length} attachment${hermesAttachments.length === 1 ? '' : 's'}: ${hermesAttachments.map(a => a.name).join(', ')}]` : '';
   const prompt = `${rawPrompt}${attachmentTextForPrompt()}`.trim();
   hermesChatHistory.push({ role: 'user', text: `${rawPrompt || '(attachments only)'}${attachmentSummary}` });
+  const liveMessage = { role: 'assistant', text: 'Starting Hermes…', meta: 'live', streaming: true };
+  hermesChatHistory.push(liveMessage);
   if (input) {
     input.value = '';
     resetHermesTextarea();
@@ -2917,27 +2964,66 @@ window.sendHermesChat = async function() {
   hermesAttachments = [];
   renderHermesAttachments();
   renderHermesChat();
-  setHermesChatBusy(true, 'Hermes is running. Still blocking, because streaming is the next plumbing job.');
+  setHermesChatBusy(true, 'Connecting to Hermes execution stream…');
+
+  const progressLines = [];
+  let finalReceived = false;
+  const handleEvent = (event) => {
+    if (event.type === 'start') {
+      liveMessage.meta = `${event.model || 'Hermes'} · live`;
+      liveMessage.text = 'Hermes is reasoning…';
+      setHermesChatBusy(true, `Running ${event.provider || ''} / ${event.model || 'Hermes'}…`);
+    } else if (event.type === 'progress') {
+      progressLines.push(event.message || 'Working…');
+      if (progressLines.length > 20) progressLines.shift();
+      liveMessage.text = progressLines.map(line => `› ${line}`).join('\n');
+      liveMessage.meta = `${event.elapsed_seconds || 0}s · live`;
+      setHermesChatBusy(true, event.message || 'Hermes is working…');
+    } else if (event.type === 'done') {
+      finalReceived = true;
+      liveMessage.streaming = false;
+      if (event.ok) {
+        liveMessage.text = event.response || '(no output)';
+        liveMessage.meta = `${event.elapsed_seconds || 0}s${event.session_id ? ` · ${event.session_id}` : ''}`;
+        setHermesChatBusy(false, `Done · ${event.elapsed_seconds || 0}s`);
+      } else {
+        liveMessage.text = event.error || 'Hermes failed without returning useful error text.';
+        liveMessage.meta = 'error';
+        setHermesChatBusy(false, `Error · exit ${event.exit_code ?? 'unknown'}`);
+      }
+    }
+    renderHermesChat();
+  };
+
   try {
-    const res = await fetch('api/hermes/chat', {
+    const res = await fetch('api/hermes/chat/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ prompt, timeout: 240 }),
     });
-    const data = await res.json();
-    if (!res.ok || !data.ok) {
-      const details = [data.error || `HTTP ${res.status}`, data.stderr || ''].filter(Boolean).join('\n');
-      hermesChatHistory.push({ role: 'assistant', text: details || 'Hermes failed without returning useful error text.', meta: 'error' });
-      setHermesChatBusy(false, `Error · exit ${data.exit_code ?? res.status}`);
-    } else {
-      hermesChatHistory.push({ role: 'assistant', text: data.response || '(no output)', meta: `${data.elapsed_seconds || 0}s` });
-      setHermesChatBusy(false, `Done · ${data.elapsed_seconds || 0}s`);
+    if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}: streaming response unavailable`);
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (true) {
+      const { value, done } = await reader.read();
+      buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        if (line.trim()) handleEvent(JSON.parse(line));
+      }
+      if (done) break;
     }
+    if (buffer.trim()) handleEvent(JSON.parse(buffer));
+    if (!finalReceived) throw new Error('Hermes stream closed without a final result');
   } catch (e) {
-    hermesChatHistory.push({ role: 'assistant', text: String(e), meta: 'network error' });
+    liveMessage.streaming = false;
+    liveMessage.text = String(e);
+    liveMessage.meta = 'network error';
     setHermesChatBusy(false, 'Network error talking to dashboard backend');
+    renderHermesChat();
   }
-  renderHermesChat();
 };
 
 const hermesChatForm = document.getElementById('hermesChatForm');
@@ -3053,7 +3139,17 @@ function workspacesSignature(d) {
       last_commit: w.repo_info?.last_commit || '',
     },
   }));
-  return JSON.stringify({ workspaces });
+  const externalAgents = (d.external_agents?.agents || []).map(a => ({
+    agent_id: a.agent_id,
+    status: a.status,
+    task: a.task,
+    model: a.model,
+    received_at: a.received_at,
+    input_tokens: a.input_tokens || 0,
+    output_tokens: a.output_tokens || 0,
+  }));
+  const externalUsage = d.external_agents?.usage || {};
+  return JSON.stringify({ workspaces, externalAgents, externalUsage });
 }
 
 function renderWorkspacesIfChanged(d, force = false) {

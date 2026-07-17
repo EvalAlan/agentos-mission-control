@@ -4,12 +4,15 @@ Python stdlib only. Read-only connections to Hermes databases.
 """
 
 import json
+import hmac
 import mimetypes
 import os
+import queue
 import re
 import signal
 import sqlite3
 import subprocess
+import threading
 import time
 import uuid
 from datetime import datetime, timezone
@@ -28,11 +31,20 @@ DB_STATE = os.path.join(HERMES_HOME, "state.db")
 DB_KANBAN = os.path.join(HERMES_HOME, "kanban.db")
 GATEWAY_JSON = os.path.join(HERMES_HOME, "gateway_state.json")
 BOARD_DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "board.db")
+AGENT_UPDATES_DB = os.environ.get(
+    "AGENTOS_AGENT_UPDATES_DB",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent-updates.db"),
+)
+AGENTOS_INGEST_TOKEN = os.environ.get("AGENTOS_INGEST_TOKEN", "")
 WORKER_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", "agentos_task_worker.py")
 WORKER_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agentos-task-worker.log")
 WORKER_LOCK = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".agentos-task-worker.lock")
 WORKER_PID = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".agentos-task-worker.pid")
 SYDNEY_AVATAR = os.path.expanduser("~/workspace/avatars/sydney.jpg")
+HERMES_CLI = os.environ.get("AGENTOS_HERMES_CLI", os.path.expanduser("~/.local/bin/hermes"))
+HERMES_CHAT_PROVIDER = os.environ.get("AGENTOS_HERMES_PROVIDER", "openai-codex")
+HERMES_CHAT_MODEL = os.environ.get("AGENTOS_HERMES_MODEL", "gpt-5.6-sol")
+ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
 
 def normalize_board_status(value):
@@ -78,6 +90,156 @@ def init_board_db():
     conn.execute("UPDATE tasks SET status = 'review', updated_at = COALESCE(updated_at, created_at) WHERE status = 'done'")
     conn.commit()
     conn.close()
+
+
+def init_agent_updates_db():
+    """Create the local event store used by remote Hermes/Claude agents."""
+    conn = sqlite3.connect(AGENT_UPDATES_DB)
+    conn.execute("""CREATE TABLE IF NOT EXISTS agent_updates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_id TEXT NOT NULL UNIQUE,
+        agent_id TEXT NOT NULL,
+        agent_name TEXT NOT NULL,
+        agent_type TEXT NOT NULL,
+        event_type TEXT NOT NULL,
+        status TEXT NOT NULL,
+        task TEXT NOT NULL,
+        model TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        input_tokens INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0,
+        cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+        cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+        cost_usd REAL NOT NULL DEFAULT 0,
+        turns INTEGER NOT NULL DEFAULT 0,
+        duration_ms INTEGER NOT NULL DEFAULT 0,
+        occurred_at TEXT NOT NULL,
+        received_at TEXT NOT NULL,
+        metadata_json TEXT NOT NULL DEFAULT '{}'
+    )""")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_agent_updates_agent_time ON agent_updates(agent_id, received_at DESC)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_agent_updates_time ON agent_updates(received_at DESC)")
+    conn.commit()
+    conn.close()
+
+
+def _bounded_text(value, name, limit, required=False):
+    text = str(value or "").strip()
+    if required and not text:
+        raise ValueError(f"Missing {name}")
+    if len(text) > limit:
+        raise ValueError(f"{name} exceeds {limit} characters")
+    return text
+
+
+def _nonnegative_number(value, name, integer=True):
+    try:
+        number = int(value or 0) if integer else float(value or 0)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must be a number")
+    if number < 0:
+        raise ValueError(f"{name} must be non-negative")
+    return number
+
+
+def record_agent_update(payload):
+    """Validate and idempotently store one update from an external agent."""
+    if not isinstance(payload, dict):
+        raise ValueError("JSON body must be an object")
+    usage = payload.get("usage") or {}
+    metadata = payload.get("metadata") or {}
+    if not isinstance(usage, dict):
+        raise ValueError("usage must be an object")
+    if not isinstance(metadata, dict):
+        raise ValueError("metadata must be an object")
+    metadata_json = json.dumps(metadata, separators=(",", ":"), sort_keys=True)
+    if len(metadata_json.encode("utf-8")) > 8192:
+        raise ValueError("metadata exceeds 8192 bytes")
+
+    now = datetime.now(timezone.utc).isoformat()
+    event_id = _bounded_text(payload.get("event_id") or str(uuid.uuid4()), "event_id", 200, True)
+    values = {
+        "event_id": event_id,
+        "agent_id": _bounded_text(payload.get("agent_id"), "agent_id", 160, True),
+        "agent_name": _bounded_text(payload.get("agent_name") or payload.get("agent_id"), "agent_name", 200, True),
+        "agent_type": _bounded_text(payload.get("agent_type") or "other", "agent_type", 40, True),
+        "event_type": _bounded_text(payload.get("event_type") or "status", "event_type", 40, True),
+        "status": _bounded_text(payload.get("status") or "unknown", "status", 40, True),
+        "task": _bounded_text(payload.get("task"), "task", 2000),
+        "model": _bounded_text(payload.get("model"), "model", 200),
+        "session_id": _bounded_text(payload.get("session_id"), "session_id", 200),
+        "input_tokens": _nonnegative_number(usage.get("input_tokens"), "usage.input_tokens"),
+        "output_tokens": _nonnegative_number(usage.get("output_tokens"), "usage.output_tokens"),
+        "cache_read_tokens": _nonnegative_number(usage.get("cache_read_tokens"), "usage.cache_read_tokens"),
+        "cache_creation_tokens": _nonnegative_number(usage.get("cache_creation_tokens"), "usage.cache_creation_tokens"),
+        "cost_usd": _nonnegative_number(usage.get("cost_usd"), "usage.cost_usd", integer=False),
+        "turns": _nonnegative_number(usage.get("turns"), "usage.turns"),
+        "duration_ms": _nonnegative_number(usage.get("duration_ms"), "usage.duration_ms"),
+        "occurred_at": _bounded_text(payload.get("occurred_at") or now, "occurred_at", 64, True),
+        "received_at": now,
+        "metadata_json": metadata_json,
+    }
+    columns = list(values)
+    conn = sqlite3.connect(AGENT_UPDATES_DB)
+    try:
+        cursor = conn.execute(
+            f"INSERT OR IGNORE INTO agent_updates ({', '.join(columns)}) VALUES ({', '.join('?' for _ in columns)})",
+            [values[column] for column in columns],
+        )
+        conn.commit()
+        created = cursor.rowcount == 1
+        row = conn.execute("SELECT id FROM agent_updates WHERE event_id = ?", (event_id,)).fetchone()
+        return {"created": created, "event_id": event_id, "id": row[0] if row else None}
+    finally:
+        conn.close()
+
+
+def external_agents_data(limit=100):
+    """Return latest agent state, recent events, and cumulative submitted usage."""
+    empty_usage = {
+        "events": 0, "input_tokens": 0, "output_tokens": 0,
+        "cache_read_tokens": 0, "cache_creation_tokens": 0,
+        "cost_usd": 0.0, "turns": 0, "duration_ms": 0,
+    }
+    if not os.path.isfile(AGENT_UPDATES_DB):
+        return {"agents": [], "recent": [], "usage": empty_usage}
+    conn = safe_read_db(AGENT_UPDATES_DB)
+    if not conn:
+        return {"agents": [], "recent": [], "usage": empty_usage}
+    try:
+        limit = max(1, min(int(limit), 500))
+        rows = [dict(row) for row in conn.execute(
+            "SELECT * FROM agent_updates ORDER BY received_at DESC, id DESC LIMIT ?", (limit,)
+        ).fetchall()]
+        latest = []
+        seen = set()
+        now = datetime.now(timezone.utc)
+        for row in rows:
+            try:
+                row["metadata"] = json.loads(row.pop("metadata_json") or "{}")
+            except Exception:
+                row["metadata"] = {}
+            if row["agent_id"] not in seen:
+                seen.add(row["agent_id"])
+                received = _parse_iso_ts(row.get("received_at"))
+                age = int((now - received).total_seconds()) if received else None
+                row["age_seconds"] = max(0, age) if age is not None else None
+                row["active"] = bool(age is not None and age <= 600 and row.get("status") in {"active", "running", "working"})
+                latest.append(row)
+        totals = conn.execute("""SELECT COUNT(*) AS events,
+            COALESCE(SUM(input_tokens), 0) AS input_tokens,
+            COALESCE(SUM(output_tokens), 0) AS output_tokens,
+            COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
+            COALESCE(SUM(cache_creation_tokens), 0) AS cache_creation_tokens,
+            COALESCE(SUM(cost_usd), 0) AS cost_usd,
+            COALESCE(SUM(turns), 0) AS turns,
+            COALESCE(SUM(duration_ms), 0) AS duration_ms
+            FROM agent_updates""").fetchone()
+        usage = dict(totals)
+        usage["cost_usd"] = round(float(usage["cost_usd"] or 0), 6)
+        return {"agents": latest, "recent": rows[:50], "usage": usage}
+    finally:
+        conn.close()
 
 
 def safe_read_db(db_path):
@@ -208,51 +370,211 @@ def worker_log_tail(lines=120):
     }
 
 
-def run_hermes_chat(prompt, timeout=240):
+def _validated_hermes_prompt(prompt, timeout):
     prompt = str(prompt or "").strip()
     if not prompt:
-        return {"ok": False, "error": "Prompt is empty"}
+        raise ValueError("Prompt is empty")
     if len(prompt) > 12000:
-        return {"ok": False, "error": "Prompt too long; keep dashboard chat under 12k chars"}
+        raise ValueError("Prompt too long; keep dashboard chat under 12k chars")
     try:
         timeout = max(30, min(int(timeout or 240), 600))
     except Exception:
         timeout = 240
+    return prompt, timeout
+
+
+def hermes_chat_command(prompt):
+    return [
+        HERMES_CLI,
+        "chat",
+        "--provider",
+        HERMES_CHAT_PROVIDER,
+        "-m",
+        HERMES_CHAT_MODEL,
+        "--source",
+        "agentos-dashboard",
+        "-q",
+        prompt,
+    ]
+
+
+def _clean_hermes_line(line):
+    line = ANSI_ESCAPE_RE.sub("", str(line or "")).strip()
+    if "┊" in line:
+        line = line.split("┊", 1)[1].strip()
+    return re.sub(r"\s+", " ", line)
+
+
+def _progress_message(line):
+    cleaned = _clean_hermes_line(line)
+    if not cleaned:
+        return ""
+    if "┊" in line or cleaned.startswith(("⚠", "❌", "⏳")):
+        return cleaned
+    return ""
+
+
+def _extract_hermes_result(lines):
+    clean_lines = [ANSI_ESCAPE_RE.sub("", line.rstrip("\r\n")) for line in lines]
+    starts = [i for i, line in enumerate(clean_lines) if line.lstrip().startswith("╭─") and "Hermes" in line]
+    response = ""
+    if starts:
+        start = starts[-1] + 1
+        end = next((i for i in range(start, len(clean_lines)) if clean_lines[i].lstrip().startswith("╰")), len(clean_lines))
+        response_lines = []
+        for line in clean_lines[start:end]:
+            if line.startswith("│"):
+                line = line[1:]
+                if line.startswith(" "):
+                    line = line[1:]
+            elif line.startswith("    "):
+                line = line[4:]
+            response_lines.append(line.rstrip())
+        while response_lines and not response_lines[0]:
+            response_lines.pop(0)
+        while response_lines and not response_lines[-1]:
+            response_lines.pop()
+        response = "\n".join(response_lines)
+    session_id = ""
+    for line in clean_lines:
+        match = re.match(r"\s*Session:\s+(\S+)", line)
+        if match:
+            session_id = match.group(1)
+    return response, session_id
+
+
+def _stop_process(proc):
+    if proc.poll() is not None:
+        return
+    proc.terminate()
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait(timeout=5)
+
+
+def iter_hermes_chat(prompt, timeout=240, popen_factory=subprocess.Popen):
+    try:
+        prompt, timeout = _validated_hermes_prompt(prompt, timeout)
+    except ValueError as exc:
+        yield {"type": "done", "ok": False, "error": str(exc), "exit_code": 2}
+        return
 
     started = time.time()
     env = os.environ.copy()
     env["HERMES_HOME"] = HERMES_HOME
+    env["PYTHONUNBUFFERED"] = "1"
+    command = hermes_chat_command(prompt)
+    yield {
+        "type": "start",
+        "provider": HERMES_CHAT_PROVIDER,
+        "model": HERMES_CHAT_MODEL,
+    }
     try:
-        proc = subprocess.run(
-            ["hermes", "chat", "-Q", "--source", "agentos-dashboard", "-q", prompt],
+        proc = popen_factory(
+            command,
             cwd=os.path.expanduser("~"),
             env=env,
             text=True,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=timeout,
-            check=False,
+            stderr=subprocess.STDOUT,
+            bufsize=1,
         )
-    except subprocess.TimeoutExpired:
-        return {"ok": False, "error": f"Hermes timed out after {timeout}s"}
     except FileNotFoundError:
-        return {"ok": False, "error": "hermes CLI not found in dashboard server PATH"}
+        yield {
+            "type": "done",
+            "ok": False,
+            "error": f"hermes CLI not found at {HERMES_CLI}",
+            "exit_code": 127,
+        }
+        return
     except Exception as exc:
-        return {"ok": False, "error": str(exc)}
+        yield {"type": "done", "ok": False, "error": str(exc), "exit_code": 1}
+        return
 
-    output = (proc.stdout or "").strip()
-    error = (proc.stderr or "").strip()
-    if len(output) > 24000:
-        output = output[-24000:]
-    if len(error) > 4000:
-        error = error[-4000:]
-    return {
-        "ok": proc.returncode == 0,
-        "response": output,
-        "stderr": error,
-        "exit_code": proc.returncode,
-        "elapsed_seconds": round(time.time() - started, 1),
+    line_queue = queue.Queue()
+
+    def read_stdout():
+        try:
+            for line in proc.stdout or ():
+                line_queue.put(line)
+        finally:
+            line_queue.put(None)
+
+    reader = threading.Thread(target=read_stdout, name="agentos-hermes-chat", daemon=True)
+    reader.start()
+    lines = []
+    timed_out = False
+    try:
+        while True:
+            remaining = timeout - (time.time() - started)
+            if remaining <= 0:
+                timed_out = True
+                _stop_process(proc)
+                break
+            try:
+                line = line_queue.get(timeout=min(0.25, remaining))
+            except queue.Empty:
+                continue
+            if line is None:
+                break
+            lines.append(line)
+            progress = _progress_message(line)
+            if progress:
+                yield {
+                    "type": "progress",
+                    "message": progress,
+                    "elapsed_seconds": round(time.time() - started, 1),
+                }
+        returncode = proc.wait(timeout=5)
+    finally:
+        if proc.poll() is None:
+            _stop_process(proc)
+
+    elapsed = round(time.time() - started, 1)
+    if timed_out:
+        yield {
+            "type": "done",
+            "ok": False,
+            "error": f"Hermes timed out after {timeout}s",
+            "exit_code": 124,
+            "elapsed_seconds": elapsed,
+        }
+        return
+
+    response, session_id = _extract_hermes_result(lines)
+    if returncode != 0 or not response:
+        diagnostic = "\n".join(_clean_hermes_line(line) for line in lines if _clean_hermes_line(line))[-4000:]
+        yield {
+            "type": "done",
+            "ok": False,
+            "error": diagnostic or f"Hermes exited with status {returncode}",
+            "exit_code": returncode,
+            "elapsed_seconds": elapsed,
+            "session_id": session_id,
+        }
+        return
+    yield {
+        "type": "done",
+        "ok": True,
+        "response": response,
+        "exit_code": returncode,
+        "elapsed_seconds": elapsed,
+        "session_id": session_id,
     }
+
+
+def run_hermes_chat(prompt, timeout=240):
+    final = None
+    for event in iter_hermes_chat(prompt, timeout):
+        if event.get("type") == "done":
+            final = event
+    return final or {"ok": False, "error": "Hermes ended without a final event"}
+
+
+def encode_ndjson_event(event):
+    return (json.dumps(event, ensure_ascii=False, default=str) + "\n").encode("utf-8")
 
 
 def reset_stale_task(task_id):
@@ -560,13 +882,11 @@ def vps_health():
         def read_stat():
             with open("/proc/stat") as f:
                 parts = f.readline().split()
-            return sum(int(p) for p in parts[1:5])
+            return sum(int(p) for p in parts[1:5]), int(parts[4])
 
-        t1 = read_stat()
-        idle1 = int(open("/proc/stat").readline().split()[4])
+        t1, idle1 = read_stat()
         time.sleep(0.1)
-        t2 = read_stat()
-        idle2 = int(open("/proc/stat").readline().split()[4])
+        t2, idle2 = read_stat()
         total = t2 - t1
         idle = idle2 - idle1
         result["cpu"] = round((1 - idle / max(total, 1)) * 100, 1)
@@ -928,13 +1248,34 @@ def _board_tasks():
         dep_map = {}
         for r in conn.execute("SELECT task_id, depends_on FROM task_deps").fetchall():
             dep_map.setdefault(r["task_id"], []).append(r["depends_on"])
+
+        now = datetime.now(timezone.utc)
+        status_map = {t["id"]: t["status"] for t in tasks}
+
         for t in tasks:
             t["depends_on"] = dep_map.get(t["id"], [])
             t["blocked"] = any(
-                dep_id not in {tt["id"]: tt["status"] for tt in tasks} or
-                {tt["id"]: tt["status"] for tt in tasks}[dep_id] not in ("review", "done")
+                dep_id not in status_map or
+                status_map[dep_id] not in ("review", "done")
                 for dep_id in t["depends_on"]
             )
+
+            # Compute staleness for in_progress tasks
+            if t["status"] == "in_progress":
+                claim_dt = _worker_claim_time(t.get("notes", ""))
+                updated_dt = _parse_iso_ts(t.get("updated_at") or t.get("created_at"))
+                age_dt = claim_dt or updated_dt
+                stale_seconds = None
+                if age_dt:
+                    stale_seconds = max(0, int((now - age_dt).total_seconds()))
+                t["claimed_at"] = claim_dt.isoformat() if claim_dt else None
+                t["stale_seconds"] = stale_seconds
+                t["stale"] = bool(stale_seconds is not None and stale_seconds > 2 * 60 * 60)
+            else:
+                t["claimed_at"] = None
+                t["stale_seconds"] = None
+                t["stale"] = False
+
         return tasks
     except Exception:
         return []
@@ -1107,6 +1448,7 @@ def get_snapshot(days=None):
         "gateway": gateway_data(),
         "activity": activity_data(),
         "sessions": sessions_data(days=days),
+        "external_agents": external_agents_data(),
         "workspaces": workspace_data(),
         "vps": vps_health(),
         "worker": worker_status(),
@@ -1137,6 +1479,32 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(body)
+
+    def stream_hermes_chat(self, prompt, timeout):
+        self.send_response(200)
+        self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Cache-Control", "no-store, no-transform")
+        self.send_header("X-Accel-Buffering", "no")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        events = iter_hermes_chat(prompt, timeout)
+        try:
+            for event in events:
+                self.wfile.write(encode_ndjson_event(event))
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            events.close()
+        finally:
+            self.close_connection = True
+
+    def _ingest_authorized(self):
+        if not AGENTOS_INGEST_TOKEN:
+            return False
+        authorization = self.headers.get("Authorization", "")
+        bearer = authorization[7:].strip() if authorization.lower().startswith("bearer ") else ""
+        supplied = bearer or self.headers.get("X-AgentOS-Token", "")
+        return bool(supplied) and hmac.compare_digest(supplied, AGENTOS_INGEST_TOKEN)
 
     def _serve_static(self, path, content_type):
         if os.path.exists(path):
@@ -1183,6 +1551,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 except (ValueError, IndexError):
                     days = None
             self.send_json(get_snapshot(days=days))
+
+        elif path == "/api/agents":
+            try:
+                limit = int(params.get("limit", ["100"])[0])
+            except (TypeError, ValueError):
+                limit = 100
+            self.send_json(external_agents_data(limit))
 
         elif path == "/events":
             self.send_response(200)
@@ -1263,9 +1638,27 @@ class DashboardHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = self._normalize_path(parsed.path)
         content_length = int(self.headers.get("Content-Length", 0))
-        body = json.loads(self.rfile.read(content_length)) if content_length > 0 else {}
+        try:
+            body = json.loads(self.rfile.read(content_length)) if content_length > 0 else {}
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            self.send_json({"error": "Invalid JSON body"}, 400)
+            return
 
-        if path == "/api/board":
+        if path == "/api/agents/update":
+            if not AGENTOS_INGEST_TOKEN:
+                self.send_json({"error": "Agent ingestion is not configured"}, 503)
+                return
+            if not self._ingest_authorized():
+                self.send_json({"error": "Unauthorized"}, 401)
+                return
+            try:
+                result = record_agent_update(body)
+            except ValueError as exc:
+                self.send_json({"error": str(exc)}, 400)
+                return
+            self.send_json({"ok": True, **result}, 201 if result["created"] else 200)
+
+        elif path == "/api/board":
             task = {
                 "id": str(uuid.uuid4()),
                 "title": body.get("title", ""),
@@ -1395,6 +1788,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
         elif path == "/api/worker/reset-task":
             self.send_json(reset_stale_task(body.get("id", "")))
 
+        elif path == "/api/hermes/chat/stream":
+            self.stream_hermes_chat(body.get("prompt", ""), body.get("timeout", 240))
+
         elif path == "/api/hermes/chat":
             self.send_json(run_hermes_chat(body.get("prompt", ""), body.get("timeout", 240)))
 
@@ -1448,12 +1844,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-AgentOS-Token")
         self.end_headers()
 
 
 if __name__ == "__main__":
     init_board_db()
+    init_agent_updates_db()
     os.makedirs(CONTENT_DIR, exist_ok=True)
     for agent in ["orchestrator", "analyst", "writer", "marketer", "coder"]:
         os.makedirs(os.path.join(CONTENT_DIR, agent), exist_ok=True)
