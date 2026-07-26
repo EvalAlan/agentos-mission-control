@@ -211,21 +211,36 @@ def external_agents_data(limit=100):
         rows = [dict(row) for row in conn.execute(
             "SELECT * FROM agent_updates ORDER BY received_at DESC, id DESC LIMIT ?", (limit,)
         ).fetchall()]
-        latest = []
-        seen = set()
-        now = datetime.now(timezone.utc)
+        agent_rows = [dict(row) for row in conn.execute("""
+            SELECT * FROM (
+                SELECT agent_updates.*,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY agent_id
+                        ORDER BY received_at DESC, id DESC
+                    ) AS agent_rank
+                FROM agent_updates
+            )
+            WHERE agent_rank = 1
+            ORDER BY received_at DESC, id DESC
+        """).fetchall()]
         for row in rows:
             try:
                 row["metadata"] = json.loads(row.pop("metadata_json") or "{}")
             except Exception:
                 row["metadata"] = {}
-            if row["agent_id"] not in seen:
-                seen.add(row["agent_id"])
-                received = _parse_iso_ts(row.get("received_at"))
-                age = int((now - received).total_seconds()) if received else None
-                row["age_seconds"] = max(0, age) if age is not None else None
-                row["active"] = bool(age is not None and age <= 600 and row.get("status") in {"active", "running", "working"})
-                latest.append(row)
+        latest = []
+        now = datetime.now(timezone.utc)
+        for row in agent_rows:
+            row.pop("agent_rank", None)
+            try:
+                row["metadata"] = json.loads(row.pop("metadata_json") or "{}")
+            except Exception:
+                row["metadata"] = {}
+            received = _parse_iso_ts(row.get("received_at"))
+            age = int((now - received).total_seconds()) if received else None
+            row["age_seconds"] = max(0, age) if age is not None else None
+            row["active"] = bool(age is not None and age <= 600 and row.get("status") in {"active", "running", "working"})
+            latest.append(row)
         totals = conn.execute("""SELECT COUNT(*) AS events,
             COALESCE(SUM(input_tokens), 0) AS input_tokens,
             COALESCE(SUM(output_tokens), 0) AS output_tokens,

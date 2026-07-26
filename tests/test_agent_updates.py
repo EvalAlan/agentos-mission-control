@@ -62,6 +62,27 @@ class AgentUpdateStoreTests(unittest.TestCase):
         self.assertEqual(data["agents"][0]["agent_id"], "claude-code:mercury")
         self.assertEqual(data["agents"][0]["metadata"]["repo"], "agentos-mission-control")
 
+    def test_known_agents_are_not_lost_when_recent_event_limit_is_saturated(self):
+        server.record_agent_update({
+            "event_id": "mercury-old",
+            "agent_id": "hermes:mercury",
+            "status": "completed",
+        })
+        for index in range(101):
+            server.record_agent_update({
+                "event_id": f"docker01-{index}",
+                "agent_id": "hermes:docker01",
+                "status": "completed",
+            })
+
+        data = server.external_agents_data(limit=100)
+
+        self.assertEqual(
+            {agent["agent_id"] for agent in data["agents"]},
+            {"hermes:docker01", "hermes:mercury"},
+        )
+        self.assertEqual(len(data["recent"]), 50)
+
 
 class AgentUpdateHttpTests(unittest.TestCase):
     def setUp(self):
