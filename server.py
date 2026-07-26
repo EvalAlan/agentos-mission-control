@@ -42,8 +42,11 @@ WORKER_LOCK = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".agentos
 WORKER_PID = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".agentos-task-worker.pid")
 SYDNEY_AVATAR = os.path.expanduser("~/workspace/avatars/sydney.jpg")
 HERMES_CLI = os.environ.get("AGENTOS_HERMES_CLI", os.path.expanduser("~/.local/bin/hermes"))
-HERMES_CHAT_PROVIDER = os.environ.get("AGENTOS_HERMES_PROVIDER", "openai-codex")
-HERMES_CHAT_MODEL = os.environ.get("AGENTOS_HERMES_MODEL", "gpt-5.6-sol")
+HERMES_CHAT_PROVIDER = os.environ.get("AGENTOS_HERMES_PROVIDER", "openrouter")
+HERMES_CHAT_MODEL = os.environ.get(
+    "AGENTOS_HERMES_MODEL",
+    "nvidia/nemotron-3-ultra-550b-a55b:free",
+)
 ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
 

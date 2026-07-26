@@ -8,6 +8,11 @@ server = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(server)
 
 
+def test_dashboard_chat_defaults_to_openrouter_nemotron():
+    assert server.HERMES_CHAT_PROVIDER == "openrouter"
+    assert server.HERMES_CHAT_MODEL == "nvidia/nemotron-3-ultra-550b-a55b:free"
+
+
 class FakeProcess:
     def __init__(self, lines, returncode=0):
         self.stdout = iter(lines)
